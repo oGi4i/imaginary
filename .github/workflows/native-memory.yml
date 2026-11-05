@@ -39,7 +39,7 @@ jobs:
       - name: Install libvips build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config curl ca-certificates libglib2.0-dev libexpat1-dev libjpeg-turbo8-dev libpng-dev libwebp-dev libtiff-dev libgif-dev libexif-dev libxml2-dev librsvg2-dev
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config curl ca-certificates libglib2.0-dev libexpat1-dev libjpeg-turbo8-dev libpng-dev libwebp-dev libtiff-dev libgif-dev libexif-dev libxml2-dev libpoppler-glib-dev
       - name: Build libvips 8.10.0
         shell: bash
         run: |
@@ -50,12 +50,18 @@ jobs:
           echo "1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9  $work/vips.tar.gz" | sha256sum --check --strict
           tar -xzf "$work/vips.tar.gz" -C "$work"
           cd "$work/vips-8.10.0"
-          ./configure --prefix=/usr/local --disable-debug --disable-dependency-tracking --disable-introspection --disable-static --disable-gtk-doc --without-magick
+          ./configure --prefix=/usr/local --disable-debug --disable-dependency-tracking --disable-introspection --disable-static --disable-gtk-doc --without-magick --without-rsvg
           make -j2
           sudo make install
           sudo ldconfig
           test "$(pkg-config --modversion vips)" = 8.10.0
           vips --version
+          vips -l foreign | tee "$work/foreign.txt"
+          grep -Fq VipsForeignLoadPdf "$work/foreign.txt"
+          if grep -Fq VipsForeignLoadSvg "$work/foreign.txt"; then
+            echo 'Unexpected SVG loader' >&2
+            exit 1
+          fi
       - name: Test, race, vet and build
         env:
           CGO_ENABLED: '1'

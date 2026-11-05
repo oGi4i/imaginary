@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/h2non/bimg"
 )
 
 func TestNativeOperationCacheDisabledAtStartup(t *testing.T) {
@@ -52,6 +54,9 @@ func TestNativeOperationCacheRemainsEmpty(t *testing.T) {
 		}
 		if got := nativeOperationCacheSize(); got != 0 {
 			t.Fatalf("request %d retained %d cached operations", i, got)
+		}
+		if memory := bimg.VipsMemory(); memory.Memory != 0 || memory.Allocations != 0 {
+			t.Fatalf("request %d retained tracked native resources: %+v", i, memory)
 		}
 	}
 }
@@ -97,6 +102,9 @@ func assertNativeRecovery(t *testing.T, handler http.Handler, input []byte) {
 	t.Helper()
 	if got := nativeOperationCacheSize(); got != 0 {
 		t.Fatalf("error path retained %d cached operations", got)
+	}
+	if memory := bimg.VipsMemory(); memory.Memory != 0 || memory.Allocations != 0 {
+		t.Fatalf("error path retained tracked native resources: %+v", memory)
 	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/resize?width=32", bytes.NewReader(input)))
