@@ -38,8 +38,9 @@ func Middleware(fn func(http.ResponseWriter, *http.Request), o ServerOptions) ht
 }
 
 func ImageMiddleware(o ServerOptions) func(Operation) http.Handler {
+	gate := newImageGate(30 * time.Second)
 	return func(fn Operation) http.Handler {
-		handler := validateImage(Middleware(imageController(o, fn), o), o)
+		handler := gate.Wrap(validateImage(Middleware(imageController(o, fn), o), o))
 
 		if o.EnableURLSignature {
 			return validateURLSignature(handler, o)

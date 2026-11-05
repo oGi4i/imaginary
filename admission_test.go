@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,6 +174,86 @@ func TestImageGateWaitTimeout(t *testing.T) {
 	case id := <-started:
 		t.Fatalf("timed-out handler %q started", id)
 	default:
+	}
+}
+
+func TestImageGateDiscardsCancelledResponse(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	continueWrite := make(chan struct{})
+	finished := make(chan struct{})
+	var writeErr error
+	handler := newImageGate(time.Second).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-continueWrite
+		w.WriteHeader(http.StatusCreated)
+		_, writeErr = w.Write([]byte("abandoned"))
+	}))
+	response := httptest.NewRecorder()
+	go func() {
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/resize", nil).WithContext(ctx))
+		close(finished)
+	}()
+	select {
+	case <-started:
+	case <-time.After(admissionTestDeadline):
+		t.Fatal("handler did not start")
+	}
+	cancel()
+	close(continueWrite)
+	select {
+	case <-finished:
+	case <-time.After(admissionTestDeadline):
+		t.Fatal("handler did not finish")
+	}
+	if writeErr != context.Canceled {
+		t.Errorf("write error = %v, want context.Canceled", writeErr)
+	}
+	if response.Code == http.StatusCreated || response.Body.Len() != 0 {
+		t.Errorf("cancelled response reached writer: status %d, body %q", response.Code, response.Body.String())
+	}
+}
+
+func TestImageGateCleansMultipartAfterHandler(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	part, err := writer.CreateFormFile("file", "image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("image")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/resize", &payload)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	if err := request.ParseMultipartForm(0); err != nil {
+		t.Fatal(err)
+	}
+	files, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var multipartFiles []string
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), "multipart-") {
+			multipartFiles = append(multipartFiles, file.Name())
+		}
+	}
+	t.Cleanup(func() { _ = request.MultipartForm.RemoveAll() })
+	if len(multipartFiles) == 0 {
+		t.Fatal("multipart request did not create a temporary file")
+	}
+	gate := newImageGate(time.Second)
+	gate.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(httptest.NewRecorder(), request)
+	for _, name := range multipartFiles {
+		if _, err := os.Stat(os.TempDir() + string(os.PathSeparator) + name); !os.IsNotExist(err) {
+			t.Errorf("multipart temporary file %q remains after handler: %v", name, err)
+		}
 	}
 }
 

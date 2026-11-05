@@ -13,6 +13,10 @@ implement the smallest change, run checks, and obtain an independent review.
 Keep active image work serialized through native processing and cleanup.
 A cancelled client must not release capacity while native code still runs.
 Health and version requests must not wait behind image work.
+`ImageMiddleware` owns the shared gate: one active request, at most one waiter,
+and a 30-second queue timeout. Multipart cleanup runs before promotion.
+Source-byte/pixel/frame/page work limits are still incomplete; do not treat
+serialization alone as an OOM-prevention policy.
 
 ## Verification and limits
 

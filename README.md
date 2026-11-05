@@ -23,10 +23,17 @@ To get started, take a look the [installation](#installation) steps, [usage](#co
 
 This fork starts from upstream v1.2.4 and keeps bimg v1.1.4 and libvips
 8.10.0 as the comparison baseline. The `mitigate-native-memory` branch adds
-regression tests and [GitHub Actions checks](docs/ci.md). Tests run on a
-GitHub-hosted runner; this is not a qualified production image or evidence
-that arbitrary inputs fit a memory limit. No image publication or deployment
-automation is enabled.
+regression tests and [GitHub Actions checks](docs/ci.md). One shared gate allows
+one active image request and at most one waiter, with a 30-second queue limit.
+Overload and queue expiry return JSON 503 with `Retry-After: 1`; health and
+version routes bypass the gate. Native processing retains the slot until the
+handler and multipart cleanup finish, even if its client disconnects.
+
+Tests run on a GitHub-hosted runner; this is not a qualified production image
+or evidence that arbitrary inputs fit a memory limit. Source-byte, pixel and
+frame/page limits are not implemented yet. The inherited `-max-allowed-size`
+flag does not bound raw POST bodies. Do not deploy this branch as an OOM fix.
+No image publication or deployment automation is enabled.
 
 ## Contents
 
