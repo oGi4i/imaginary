@@ -31,11 +31,16 @@ Overload and queue expiry return JSON 503 with `Retry-After: 1`; health and
 version routes bypass the gate. Native processing retains the slot until the
 handler and multipart cleanup finish, even if its client disconnects.
 
-Tests run on a GitHub-hosted runner; this is not a qualified production image
-or evidence that arbitrary inputs fit a memory limit. Source-byte, pixel and
-frame/page limits are not implemented yet. The inherited `-max-allowed-size`
-flag does not bound raw POST bodies. Do not deploy this branch as an OOM fix.
-No image publication or deployment automation is enabled.
+Source admission accepts only single-frame JPEG, PNG and WebP. The default
+16,000,000 source-pixel limit is provisional and not qualified. Image watermarks
+are disabled; output and intermediate work remain unbounded. See the
+[source policy](docs/source-limits.md) and [candidate image](docs/candidate-image.md).
+Source-byte limits are incomplete; the inherited `-max-allowed-size` flag does
+not bound raw POST bodies.
+
+Tests run on a GitHub-hosted runner; they do not qualify a production image or
+prove a memory bound. Do not deploy this branch as an OOM fix. No image
+publication or deployment automation is enabled.
 
 ## Contents
 

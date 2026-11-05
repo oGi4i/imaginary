@@ -15,8 +15,10 @@ A cancelled client must not release capacity while native code still runs.
 Health and version requests must not wait behind image work.
 `ImageMiddleware` owns the shared gate: one active request, at most one waiter,
 and a 30-second queue timeout. Multipart cleanup runs before promotion.
-Source-byte/pixel/frame/page work limits are still incomplete; do not treat
-serialization alone as an OOM-prevention policy.
+Source admission accepts single-frame JPEG, PNG and WebP with a provisional
+16,000,000-pixel default; see `docs/source-limits.md`. Image watermarks are
+disabled. Source-byte and output/intermediate work limits are incomplete; do not
+treat these controls as a qualified OOM-prevention policy.
 
 `native_cache.go` disables the operation cache with `bimg.VipsCacheSetMax(0)`
 in package initialization, after bimg/libvips initialization and before requests.

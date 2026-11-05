@@ -74,7 +74,7 @@ func TestNativeCacheErrorRecovery(t *testing.T) {
 		body []byte
 		path string
 	}{
-		{"decoder", []byte("\xff\xd8\xffmalformed jpeg"), "/resize?width=32"},
+		{"decoder", append(append(rasterTestPNG(1, 1)[:33:33], rasterTestPNGChunk("IDAT", []byte("not zlib"))...), rasterTestPNGChunk("IEND", nil)...), "/resize?width=32"},
 		{"operation", input, "/extract?top=999999&left=999999&areawidth=10&areaheight=10"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

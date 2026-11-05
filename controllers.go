@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/h2non/bimg"
-	"github.com/h2non/filetype"
 )
 
 func indexController(w http.ResponseWriter, r *http.Request) {
@@ -78,27 +77,9 @@ func determineAcceptMimeType(accept string) string {
 }
 
 func imageHandler(w http.ResponseWriter, r *http.Request, buf []byte, operation Operation, o ServerOptions) {
-	// Infer the body MIME type via mime sniff algorithm
-	mimeType := http.DetectContentType(buf)
-
-	// If cannot infer the type, infer it via magic numbers
-	if mimeType == "application/octet-stream" {
-		kind, err := filetype.Get(buf)
-		if err == nil && kind.MIME.Value != "" {
-			mimeType = kind.MIME.Value
-		}
-	}
-
-	// Infer text/plain responses as potential SVG image
-	if strings.Contains(mimeType, "text/plain") && len(buf) > 8 {
-		if bimg.IsSVGImage(buf) {
-			mimeType = "image/svg+xml"
-		}
-	}
-
-	// Finally check if image MIME type is supported
-	if !IsImageMimeTypeSupported(mimeType) {
-		ErrorReply(r, w, ErrUnsupportedMedia, o)
+	if err := validateRasterSource(buf, o.MaxSourcePixels); err != nil {
+		// Do not invoke the native placeholder for rejected source data.
+		ErrorReply(r, w, err.(Error), ServerOptions{})
 		return
 	}
 
@@ -119,6 +100,10 @@ func imageHandler(w http.ResponseWriter, r *http.Request, buf []byte, operation 
 
 	image, err := operation.Run(buf, opts)
 	if err != nil {
+		if err == errExcludedWatermark {
+			ErrorReply(r, w, errExcludedWatermark, ServerOptions{})
+			return
+		}
 		ErrorReply(r, w, NewError("Error while processing the image: "+err.Error(), http.StatusBadRequest), o)
 		return
 	}

@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"hash/crc32"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 )
 
@@ -204,6 +207,43 @@ func TestRasterSourceMalformedContainers(t *testing.T) {
 				t.Run(strconv.Itoa(n), func(t *testing.T) {
 					rasterTestStatus(t, test.data[:n], 16000000, http.StatusBadRequest)
 				})
+			}
+		})
+	}
+}
+
+func TestRasterSourceRejectsWatermarkImageBeforeFetch(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		_, _ = w.Write(rasterTestPNG(1, 1))
+	}))
+	defer server.Close()
+
+	operations, err := json.Marshal([]map[string]interface{}{{
+		"operation": "watermarkImage", "ignore_failure": true,
+		"params": map[string]interface{}{"image": server.URL},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		op    Operation
+		query url.Values
+	}{
+		{"direct", WatermarkImage, url.Values{"image": {server.URL}}},
+		{"pipeline", Pipeline, url.Values{"operations": {string(operations)}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/"+tc.name+"?"+tc.query.Encode(), nil)
+			imageHandler(response, request, rasterTestPNG(1, 1), tc.op, ServerOptions{EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: 299})
+			if response.Code != http.StatusNotAcceptable || response.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("status = %d, type = %q, body = %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+			if got := atomic.LoadInt32(&requests); got != 0 {
+				t.Fatalf("watermark server received %d requests", got)
 			}
 		})
 	}

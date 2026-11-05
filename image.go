@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"strings"
-	"io/ioutil"
 	"math"
 	"net/http"
+	"strings"
 
 	"github.com/h2non/bimg"
 )
@@ -328,37 +326,7 @@ func Watermark(buf []byte, o ImageOptions) (Image, error) {
 }
 
 func WatermarkImage(buf []byte, o ImageOptions) (Image, error) {
-	if o.Image == "" {
-		return Image{}, NewError("Missing required param: image", http.StatusBadRequest)
-	}
-	response, err := http.Get(o.Image)
-	if err != nil {
-		return Image{}, NewError(fmt.Sprintf("Unable to retrieve watermark image. %s", o.Image), http.StatusBadRequest)
-	}
-	defer func() {
-		_ = response.Body.Close()
-	}()
-
-	bodyReader := io.LimitReader(response.Body, 1e6)
-
-	imageBuf, err := ioutil.ReadAll(bodyReader)
-	if len(imageBuf) == 0 {
-		errMessage := "Unable to read watermark image"
-
-		if err != nil {
-			errMessage = fmt.Sprintf("%s. %s", errMessage, err.Error())
-		}
-
-		return Image{}, NewError(errMessage, http.StatusBadRequest)
-	}
-
-	opts := BimgOptions(o)
-	opts.WatermarkImage.Left = o.Left
-	opts.WatermarkImage.Top = o.Top
-	opts.WatermarkImage.Buf = imageBuf
-	opts.WatermarkImage.Opacity = o.Opacity
-
-	return Process(buf, opts)
+	return Image{}, errExcludedWatermark
 }
 
 func GaussianBlur(buf []byte, o ImageOptions) (Image, error) {
@@ -379,6 +347,9 @@ func Pipeline(buf []byte, o ImageOptions) (Image, error) {
 
 	// Validate and built operations
 	for i, operation := range o.Operations {
+		if operation.Name == "watermarkImage" {
+			return Image{}, errExcludedWatermark
+		}
 		// Validate supported operation name
 		var exists bool
 		if operation.Operation, exists = OperationsMap[operation.Name]; !exists {
