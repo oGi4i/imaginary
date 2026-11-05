@@ -70,27 +70,33 @@ jobs:
         run: |
           go mod download
           go mod verify
+      - name: Body limit boundary test
+        if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
+        env:
+          CGO_ENABLED: '1'
+          GOFLAGS: -mod=readonly
+        run: timeout --signal=TERM --kill-after=15s 60s go test -v -count=1 -timeout=50s -run '^TestBodyLimitRawPOSTBoundaries$' ./...
       - name: Unit and integration tests
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: go test -count=1 -timeout=5m ./...
+        run: timeout --signal=TERM --kill-after=15s 5m go test -v -count=1 -timeout=4m ./...
       - name: Race tests
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: go test -race -count=1 -timeout=5m ./...
+        run: timeout --signal=TERM --kill-after=15s 5m go test -v -race -count=1 -timeout=4m ./...
       - name: Vet
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: go vet ./...
+        run: timeout --signal=TERM --kill-after=15s 120s go vet ./...
       - name: Build binary
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: go build -o "$RUNNER_TEMP/imaginary" .
+        run: timeout --signal=TERM --kill-after=15s 120s go build -o "$RUNNER_TEMP/imaginary" .

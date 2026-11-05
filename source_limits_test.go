@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/crc32"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -128,6 +130,39 @@ func TestRasterSourcePixelLimits(t *testing.T) {
 	rasterTestStatus(t, rasterTestWebP(rasterTestVP8L(1<<14, 1<<14)), 16000000, http.StatusRequestEntityTooLarge)
 }
 
+func TestRasterSourcePNGHeaderFields(t *testing.T) {
+	for _, tc := range []struct {
+		name                                         string
+		depth, color, compression, filter, interlace byte
+		status                                       int
+	}{
+		{"gray-1", 1, 0, 0, 0, 0, 0},
+		{"gray-16-interlaced", 16, 0, 0, 0, 1, 0},
+		{"rgb-8", 8, 2, 0, 0, 0, 0},
+		{"indexed-4", 4, 3, 0, 0, 0, 0},
+		{"gray-alpha-16", 16, 4, 0, 0, 0, 0},
+		{"rgba-8", 8, 6, 0, 0, 0, 0},
+		{"depth-zero", 0, 2, 0, 0, 0, http.StatusBadRequest},
+		{"rgb-depth-1", 1, 2, 0, 0, 0, http.StatusBadRequest},
+		{"indexed-depth-16", 16, 3, 0, 0, 0, http.StatusBadRequest},
+		{"gray-alpha-depth-4", 4, 4, 0, 0, 0, http.StatusBadRequest},
+		{"rgba-depth-4", 4, 6, 0, 0, 0, http.StatusBadRequest},
+		{"unknown-color", 8, 5, 0, 0, 0, http.StatusBadRequest},
+		{"compression", 8, 2, 1, 0, 0, http.StatusBadRequest},
+		{"filter", 8, 2, 0, 1, 0, http.StatusBadRequest},
+		{"interlace", 8, 2, 0, 0, 2, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := rasterTestPNG(1, 1)
+			copy(buf[24:29], []byte{tc.depth, tc.color, tc.compression, tc.filter, tc.interlace})
+			binary.BigEndian.PutUint32(buf[29:33], crc32.ChecksumIEEE(buf[12:29]))
+			rasterTestStatus(t, buf, 16000000, tc.status)
+		})
+	}
+	rasterTestStatus(t, rasterTestPNG(0x80000000, 1), 16000000, http.StatusBadRequest)
+	rasterTestStatus(t, rasterTestPNG(1, 0x80000000), 16000000, http.StatusBadRequest)
+}
+
 func TestRasterSourceRealFiles(t *testing.T) {
 	for _, name := range []string{"imaginary.jpg", "test.png", "test.webp"} {
 		t.Run(name, func(t *testing.T) {
@@ -212,6 +247,48 @@ func TestRasterSourceMalformedContainers(t *testing.T) {
 	}
 }
 
+type rasterFailingReader struct{}
+
+func (rasterFailingReader) Read([]byte) (int, error) {
+	return 0, errors.New("input read failed")
+}
+
+func TestRasterSourceReadFailuresBypassPlaceholder(t *testing.T) {
+	var multipartBody bytes.Buffer
+	writer := multipart.NewWriter(&multipartBody)
+	_, err := writer.CreateFormFile("file", "empty.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name        string
+		body        io.Reader
+		contentType string
+	}{
+		{"empty-raw", bytes.NewReader(nil), "application/octet-stream"},
+		{"read-error", rasterFailingReader{}, "application/octet-stream"},
+		{"empty-multipart", bytes.NewReader(multipartBody.Bytes()), writer.FormDataContentType()},
+		{"broken-multipart", bytes.NewReader([]byte("invalid multipart")), "multipart/form-data; boundary=boundary"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := ServerOptions{EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: 299}
+			LoadSources(o)
+			called := 0
+			op := Operation(func([]byte, ImageOptions) (Image, error) { called++; return Image{}, nil })
+			req := httptest.NewRequest(http.MethodPost, "/resize?width=1&height=1", tc.body)
+			req.Header.Set("Content-Type", tc.contentType)
+			response := httptest.NewRecorder()
+			imageController(o, op)(response, req)
+			if called != 0 || response.Code != http.StatusBadRequest || response.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("calls = %d, status = %d, type = %q, body = %s", called, response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+		})
+	}
+}
+
 func TestRasterSourceRejectsWatermarkImageBeforeFetch(t *testing.T) {
 	var requests int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -244,6 +321,27 @@ func TestRasterSourceRejectsWatermarkImageBeforeFetch(t *testing.T) {
 			}
 			if got := atomic.LoadInt32(&requests); got != 0 {
 				t.Fatalf("watermark server received %d requests", got)
+			}
+		})
+	}
+}
+
+func TestRasterSourceInvalidParamsBypassPlaceholder(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		op    Operation
+		query url.Values
+	}{
+		{"direct-watermark", WatermarkImage, url.Values{"quality": {"not-a-number"}}},
+		{"pipeline-watermark", Pipeline, url.Values{"quality": {"not-a-number"}, "operations": {`[{"operation":"watermarkImage","ignore_failure":true}]`}}},
+		{"ordinary", Operation(func([]byte, ImageOptions) (Image, error) { t.Fatal("operation must not run"); return Image{}, nil }), url.Values{"quality": {"not-a-number"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/resize?"+tc.query.Encode(), nil)
+			imageHandler(response, request, rasterTestPNG(1, 1), tc.op, ServerOptions{EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: 299})
+			if response.Code != http.StatusBadRequest || response.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("status = %d, type = %q, body = %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
 			}
 		})
 	}
