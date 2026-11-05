@@ -6,6 +6,13 @@ package main
 */
 import "C"
 
+import "github.com/h2non/bimg"
+
+func init() {
+	// Dependency initialization finishes before this package accepts any work.
+	bimg.VipsCacheSetMax(0)
+}
+
 func nativeOperationCacheLimit() int {
 	return int(C.vips_cache_get_max())
 }

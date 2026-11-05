@@ -18,6 +18,11 @@ and a 30-second queue timeout. Multipart cleanup runs before promotion.
 Source-byte/pixel/frame/page work limits are still incomplete; do not treat
 serialization alone as an OOM-prevention policy.
 
+`native_cache.go` disables the operation cache with `bimg.VipsCacheSetMax(0)`
+in package initialization, after bimg/libvips initialization and before requests.
+Its native getters provide read-only cache assertions for tests; there is no
+preload library or control-file interface.
+
 ## Verification and limits
 
 Use `.github/workflows/native-memory.yml` for tests, race checks, vet and build.
