@@ -1,0 +1,69 @@
+name: Native memory CI
+
+on:
+  push:
+    branches:
+      - mitigate-native-memory
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+        with:
+          go-version: '1.20.14'
+          cache: false
+      - name: Check formatting of changed Go files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(git diff --name-only -z --diff-filter=ACMR 9357624e976790905f1b1bf4d059f8643c21e6fb -- '*.go')
+          if ((${#files[@]})); then
+            unformatted="$(gofmt -l "${files[@]}")"
+            if [[ -n "$unformatted" ]]; then
+              printf 'Go files need formatting:\n%s\n' "$unformatted"
+              exit 1
+            fi
+          fi
+      - name: Install libvips build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config curl ca-certificates libglib2.0-dev libexpat1-dev libjpeg-turbo8-dev libpng-dev libwebp-dev libtiff-dev libgif-dev libexif-dev libxml2-dev librsvg2-dev
+      - name: Build libvips 8.10.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          curl --fail --location --retry 3 --output "$work/vips.tar.gz" https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz
+          echo "1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9  $work/vips.tar.gz" | sha256sum --check --strict
+          tar -xzf "$work/vips.tar.gz" -C "$work"
+          cd "$work/vips-8.10.0"
+          ./configure --prefix=/usr/local --disable-debug --disable-dependency-tracking --disable-introspection --disable-static --disable-gtk-doc --without-magick
+          make -j2
+          sudo make install
+          sudo ldconfig
+          test "$(pkg-config --modversion vips)" = 8.10.0
+          vips --version
+      - name: Test, race, vet and build
+        env:
+          CGO_ENABLED: '1'
+          GOFLAGS: -mod=readonly
+        run: |
+          go mod download
+          go mod verify
+          go test -count=1 ./...
+          go test -race -count=1 ./...
+          go vet ./...
+          go build -o "$RUNNER_TEMP/imaginary" .

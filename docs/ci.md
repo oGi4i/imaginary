@@ -1,0 +1,9 @@
+# Native memory CI
+
+The `Native memory CI` workflow runs on pushes to `mitigate-native-memory` and by manual dispatch. GitHub requires the workflow file on the default branch before manual dispatch is available. A branch push can run it before then.
+
+The GitHub-hosted Ubuntu 22.04 runner installs build dependencies, verifies the SHA-256 of the [libvips 8.10.0 release archive](https://github.com/libvips/libvips/releases/tag/v8.10.0), and builds libvips from source. It installs Go 1.20.14, downloads Go modules including bimg v1.1.4 with `go.sum` verification, and runs `go mod verify`. It checks formatting of Go files changed since v1.2.4, then runs all package tests, the race detector, `go vet`, and a binary build. The build includes librsvg for SVG support. Module updates are disabled. The workflow does not publish the binary or an image and needs no secrets.
+
+This is a test environment, not a qualified production image. The existing Dockerfile uses Debian Buster; the Ubuntu runner uses a different glibc and different native dependencies. Results do not establish production ABI compatibility or memory behavior. The runner image, OS packages, and other build inputs are not fully pinned; the archive checksum and action commit pins do not make the build reproducible. The workflow does not alter the existing Dockerfile.
+
+The release archive uses SHA-256 `1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9`. libvips configuration options can be checked in the release archive's `configure --help`; upstream [build notes](https://github.com/libvips/libvips/blob/v8.10.0/README.md) describe its dependencies. GitHub documents [workflow triggers](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) and [manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).

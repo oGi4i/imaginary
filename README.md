@@ -19,6 +19,15 @@ settings or Go native `image` package, and in some cases it's even 8x faster pro
 
 To get started, take a look the [installation](#installation) steps, [usage](#command-line-usage) cases and [API](#http-api) docs.
 
+## Native-memory candidate fork
+
+This fork starts from upstream v1.2.4 and keeps bimg v1.1.4 and libvips
+8.10.0 as the comparison baseline. The `mitigate-native-memory` branch adds
+regression tests and [GitHub Actions checks](docs/ci.md). Tests run on a
+GitHub-hosted runner; this is not a qualified production image or evidence
+that arbitrary inputs fit a memory limit. No image publication or deployment
+automation is enabled.
+
 ## Contents
 
 - [Supported image operations](#supported-image-operations)
