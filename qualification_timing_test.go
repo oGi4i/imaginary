@@ -322,6 +322,21 @@ func TestQualificationLifecycleAuthPlaceholderIsRejection(t *testing.T) {
 	}
 }
 
+func TestQualificationLifecycleBrokenAuthPlaceholderIsError(t *testing.T) {
+	store := newQualificationTimingStore()
+	o := ServerOptions{QualSnapshot: true, APIKey: "required", EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: http.StatusOK}
+	auth := authorizeClient(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("unauthorized request reached handler")
+	}), o)
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(auth, true))
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/resize?width=64&height=64", nil))
+	got := store.snapshot()
+	if response.Code != http.StatusBadRequest || len(got.Records) != 1 || got.Records[0].Status != 3 {
+		t.Fatalf("broken native placeholder must be an error: status=%d record=%+v", response.Code, got)
+	}
+}
+
 func TestQualificationLifecycleErrorMarker(t *testing.T) {
 	store := newQualificationTimingStore()
 	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
