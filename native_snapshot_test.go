@@ -58,8 +58,8 @@ func TestQualificationConcurrentSnapshots(t *testing.T) {
 
 func TestQualificationSmapsParser(t *testing.T) {
 	for _, tc := range []struct {
-		input string
-		ok bool
+		input     string
+		ok        bool
 		rss, lazy uint64
 	}{
 		{"Rss: 42 kB\nLazyFree: 3 kB\n", true, 43008, 3072},
