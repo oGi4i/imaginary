@@ -41,6 +41,12 @@ default is provisional, not qualified. Oversized inputs return fixed JSON 413,
 without a placeholder. The inherited `-max-allowed-size` flag remains a separate
 HTTP HEAD precheck.
 
+A default-off, read-only qualification snapshot listener is available only on
+`127.0.0.1:9001` with `-qualification-snapshot`. It does not expose a route on
+the application listener. Cgroup identity is unproven and cgroup data is
+unavailable; this partial interface cannot qualify memory. See
+[qualification observations](docs/qualification-observation.md).
+
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image
 publication or deployment automation is enabled.

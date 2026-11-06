@@ -35,6 +35,7 @@ var (
 	aMaxAllowedSize     = flag.Int("max-allowed-size", 0, "Restrict maximum size of http image source (in bytes)")
 	aMaxBodyBytes       = flag.Int64("max-body-bytes", defaultMaxBodyBytes, "Maximum image source bytes, including multipart framing (provisional, not qualified)")
 	aMaxSourcePixels    = flag.Int64("max-source-pixels", defaultMaxSourcePixels, "Maximum source pixels (provisional, not qualified)")
+	aQualSnapshot       = flag.Bool("qualification-snapshot", false, "Enable read-only qualification listener on 127.0.0.1:9001")
 	aKey                = flag.String("key", "", "Define API key for authorization")
 	aMount              = flag.String("mount", "", "Mount server local directory")
 	aCertFile           = flag.String("certfile", "", "TLS certificate file path")
@@ -98,6 +99,7 @@ Options:
   -max-allowed-size <bytes>  Restrict maximum size of http image source (in bytes)
   -max-body-bytes <bytes>    Image source byte limit [default: 16777216, provisional; nonpositive uses default]
   -max-source-pixels <num>   Source pixel limit [default: 16000000, provisional]
+  -qualification-snapshot   Enable private loopback snapshot listener [default: false]
   -certfile <path>           TLS certificate file path
   -keyfile <path>            TLS private key file path
   -authorization <value>     Defines a constant Authorization header value passed to all the image source servers. -enable-url-source flag must be defined. This overwrites authorization headers forwarding behavior via X-Forward-Authorization
@@ -137,6 +139,7 @@ func main() {
 
 	opts := ServerOptions{
 		Port:               port,
+		QualSnapshot:       *aQualSnapshot,
 		Address:            *aAddr,
 		CORS:               *aCors,
 		AuthForwarding:     *aAuthForwarding,

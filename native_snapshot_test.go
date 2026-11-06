@@ -39,6 +39,19 @@ func TestQualificationSnapshotReadOnly(t *testing.T) {
 	}
 }
 
+func TestQualificationUnavailableProcessMemory(t *testing.T) {
+	h := qualificationHandler(func() (*uint64, *uint64, string) { return nil, nil, "unavailable" })
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/snapshot", nil))
+	var got qualificationSnapshot
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ProcessStatus != "unavailable" || got.ProcessRSSBytes != nil || got.ProcessLazyFreeBytes != nil {
+		t.Fatal("unavailable process memory must not be reported as zero")
+	}
+}
+
 func TestQualificationConcurrentSnapshots(t *testing.T) {
 	h := newQualificationHandler()
 	var wg sync.WaitGroup
@@ -76,10 +89,14 @@ func TestQualificationSmapsParser(t *testing.T) {
 }
 
 func TestQualificationCgroupIdentityFailsClosed(t *testing.T) {
-	for _, input := range []string{"", "0::/\n", "0::/kubepods.slice/pod123\n", "0::/container\n0::/other\n", "1:memory:/foo\n"} {
-		if err := validateQualificationCgroup(strings.NewReader(input), strings.NewReader("")); err == nil {
-			t.Errorf("ambiguous cgroup accepted: %q", input)
-		}
+	w := httptest.NewRecorder()
+	newQualificationHandler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/snapshot", nil))
+	var got qualificationSnapshot
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.CgroupStatus != "identity_unproven" || got.CgroupCurrentBytes != nil || got.CgroupPeakBytes != nil || got.CgroupAnonBytes != nil || got.CgroupFileBytes != nil {
+		t.Fatal("unproven container identity must not expose counters")
 	}
 }
 

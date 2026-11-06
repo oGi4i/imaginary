@@ -24,6 +24,7 @@ type ServerOptions struct {
 	MaxAllowedSize     int
 	MaxBodyBytes       int64
 	MaxSourcePixels    int64
+	QualSnapshot       bool
 	CORS               bool
 	Gzip               bool // deprecated
 	AuthForwarding     bool
@@ -63,6 +64,14 @@ func (e Endpoints) IsValid(r *http.Request) bool {
 }
 
 func Server(o ServerOptions) {
+	var qualification *http.Server
+	if o.QualSnapshot {
+		var err error
+		qualification, err = startQualificationServer()
+		if err != nil {
+			log.Fatal("qualification listener unavailable")
+		}
+	}
 	addr := o.Address + ":" + strconv.Itoa(o.Port)
 	handler := NewLog(NewServerMux(o), os.Stdout, o.LogLevel)
 
@@ -92,6 +101,9 @@ func Server(o ServerOptions) {
 		cancel()
 	}()
 
+	if qualification != nil {
+		_ = qualification.Shutdown(ctx)
+	}
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server Shutdown Failed:%+v", err)
 	}

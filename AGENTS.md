@@ -26,7 +26,10 @@ a qualified OOM-prevention policy.
 `native_cache.go` disables the operation cache with `bimg.VipsCacheSetMax(0)`
 in package initialization, after bimg/libvips initialization and before requests.
 Its native getters provide read-only cache assertions for tests; there is no
-preload library or control-file interface.
+preload library or control-file interface. The default-off qualification
+snapshot listener is read-only, loopback-only and separate from the application
+port. Cgroup identity is not yet established, so its counters are unavailable;
+the listener is not qualification evidence. See `docs/qualification-observation.md`.
 
 ## Verification and limits
 
