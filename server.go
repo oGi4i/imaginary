@@ -101,12 +101,34 @@ func Server(o ServerOptions) {
 		cancel()
 	}()
 
+	var observer shutdownServer
 	if qualification != nil {
-		_ = qualification.Shutdown(ctx)
+		observer = qualification
 	}
-	if err := server.Shutdown(ctx); err != nil {
+	if err := shutdownServers(ctx, server, observer); err != nil {
 		log.Fatalf("Server Shutdown Failed:%+v", err)
 	}
+}
+
+type shutdownServer interface {
+	Shutdown(context.Context) error
+}
+
+func shutdownServers(ctx context.Context, application, observer shutdownServer) error {
+	if observer == nil {
+		return application.Shutdown(ctx)
+	}
+	observerDone := make(chan struct{})
+	go func() {
+		_ = observer.Shutdown(ctx)
+		close(observerDone)
+	}()
+	err := application.Shutdown(ctx)
+	select {
+	case <-observerDone:
+	case <-ctx.Done():
+	}
+	return err
 }
 
 func listenAndServe(s *http.Server, o ServerOptions) error {
