@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,9 @@ func TestQualificationSnapshotReadOnly(t *testing.T) {
 		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/snapshot", nil))
 		if w.Code != http.StatusOK || w.Body.Len() > 32768 {
 			t.Fatalf("snapshot response %d (%d bytes)", w.Code, w.Body.Len())
+		}
+		if w.Header().Get("Content-Length") != strconv.Itoa(w.Body.Len()) {
+			t.Fatal("snapshot must have an exact Content-Length")
 		}
 		var got qualificationSnapshot
 		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
@@ -36,6 +40,28 @@ func TestQualificationSnapshotReadOnly(t *testing.T) {
 		if w.Code < 400 || !json.Valid(w.Body.Bytes()) || strings.Contains(w.Body.String(), "private") {
 			t.Fatalf("unsafe error for %s %s: %d %s", tc.method, tc.path, w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestQualificationSnapshotFullRingContentLength(t *testing.T) {
+	store := qualificationTimings
+	store.mu.Lock()
+	savedRecords, savedCount, savedCompleted, savedOverwrites := store.records, store.count, store.completed, store.overwrites
+	store.count, store.completed = len(store.records), uint64(len(store.records))
+	for i := range store.records {
+		value := int64(9223372036854775807)
+		store.records[i] = qualificationTimingRecord{RequestSequence: ^uint64(0), CompletionSequence: ^uint64(0), Status: 4, QueueNS: &value, SourcePreflightNS: &value, TransformOutputNS: &value, ResponseNS: &value, CleanupNS: &value, ProcessingNS: &value}
+	}
+	store.mu.Unlock()
+	defer func() {
+		store.mu.Lock()
+		store.records, store.count, store.completed, store.overwrites = savedRecords, savedCount, savedCompleted, savedOverwrites
+		store.mu.Unlock()
+	}()
+	w := httptest.NewRecorder()
+	newQualificationHandler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/snapshot", nil))
+	if w.Code != http.StatusOK || w.Body.Len() > 32768 || w.Header().Get("Content-Length") != strconv.Itoa(w.Body.Len()) {
+		t.Fatalf("invalid full-ring response: status=%d bytes=%d length=%q", w.Code, w.Body.Len(), w.Header().Get("Content-Length"))
 	}
 }
 

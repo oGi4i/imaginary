@@ -108,7 +108,14 @@ func qualificationHandler(processMemory func() (*uint64, *uint64, string)) http.
 		}
 		snapshot.ProcessRSSBytes, snapshot.ProcessLazyFreeBytes, snapshot.ProcessStatus = processMemory()
 		snapshot.Lifecycle = qualificationTimings.snapshot()
-		_ = json.NewEncoder(w).Encode(snapshot)
+		body, err := json.Marshal(snapshot)
+		if err != nil || len(body) > 32768 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "{\"error\":\"snapshot_unavailable\"}\n")
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = w.Write(body)
 	})
 }
 

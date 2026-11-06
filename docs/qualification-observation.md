@@ -51,7 +51,7 @@ cleanup and precedes gate promotion. Request sequence is assigned at gate entry,
 and completion order can differ. `overwrite_total` counts ring turnover, not
 lost collector data. A collector detects lost unread records with its completion
 cursor and the oldest retained completion sequence, not request sequence gaps.
-The JSON snapshot is bounded to 32 KiB by the fixed-size record ring.
+The JSON snapshot is limited to 32 KiB and carries an exact `Content-Length`.
 
 Trusted container identity, collector integration, qualification and
 observation-overhead measurement are not implemented here.
