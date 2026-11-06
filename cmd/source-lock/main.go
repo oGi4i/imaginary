@@ -16,13 +16,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	file, err := os.Open(args[0])
 	if err != nil {
-		fmt.Fprintf(stderr, "open lock: %v\n", err)
+		fmt.Fprintln(stderr, "cannot open lock")
 		return 1
 	}
 	defer file.Close()
 	missing, err := sourcelock.Validate(file)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid lock: %v\n", err)
+		fmt.Fprintln(stderr, "invalid lock")
 		return 1
 	}
 	if len(missing) > 0 {

@@ -9,18 +9,21 @@ import (
 	"io"
 	"net/url"
 	"regexp"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
 const maxLockBytes = 1 << 20
 
 var (
-	sha256Pattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	keyPattern      = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
-	namePattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9+._-]*$`)
-	versionPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+:~_-]*$`)
-	platformPattern = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$`)
-	imagePattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$`)
+	sha256Pattern         = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	keyPattern            = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+	namePattern           = regexp.MustCompile(`^[a-z0-9][a-z0-9+._-]*$`)
+	versionPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+:~_-]*$`)
+	platformPattern       = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$`)
+	imageComponentPattern = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$`)
+	registryPattern       = regexp.MustCompile(`^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?$`)
 )
 
 // Validate returns unresolved input names, or an error for an invalid lock.
@@ -28,7 +31,7 @@ var (
 func Validate(r io.Reader) ([]string, error) {
 	data, err := io.ReadAll(io.LimitReader(r, maxLockBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("read lock: %w", err)
+		return nil, fmt.Errorf("cannot read lock")
 	}
 	if len(data) > maxLockBytes {
 		return nil, fmt.Errorf("lock exceeds %d bytes", maxLockBytes)
@@ -46,7 +49,7 @@ func Validate(r io.Reader) ([]string, error) {
 		if err == nil {
 			return nil, fmt.Errorf("trailing JSON value")
 		}
-		return nil, fmt.Errorf("trailing data: %w", err)
+		return nil, fmt.Errorf("invalid trailing data")
 	}
 	root, err := object(value, "lock", "schema_version", "source", "libvips", "platform", "builder_image", "runtime_image", "snapshot", "build_packages", "runtime_packages", "go_toolchain", "build_tools", "features")
 	if err != nil {
@@ -80,7 +83,7 @@ func Validate(r io.Reader) ([]string, error) {
 		case "platform":
 			err = match(v, field, platformPattern)
 		case "builder_image", "runtime_image":
-			err = match(v, field, imagePattern)
+			err = validateImage(v, field)
 		case "go_toolchain":
 			err = match(v, field, versionPattern)
 		case "snapshot":
@@ -106,7 +109,7 @@ func readValue(d *json.Decoder, depth int) (interface{}, error) {
 	}
 	t, err := d.Token()
 	if err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+		return nil, fmt.Errorf("invalid JSON")
 	}
 	delim, ok := t.(json.Delim)
 	if !ok {
@@ -118,14 +121,14 @@ func readValue(d *json.Decoder, depth int) (interface{}, error) {
 		for d.More() {
 			key, err := d.Token()
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("invalid JSON object key")
 			}
 			k, ok := key.(string)
 			if !ok {
 				return nil, fmt.Errorf("invalid object key")
 			}
 			if _, exists := m[k]; exists {
-				return nil, fmt.Errorf("duplicate key %q", k)
+				return nil, fmt.Errorf("duplicate object key")
 			}
 			v, err := readValue(d, depth+1)
 			if err != nil {
@@ -171,7 +174,7 @@ func object(v interface{}, path string, fields ...string) (map[string]interface{
 	}
 	for k := range m {
 		if !allowed[k] {
-			return nil, fmt.Errorf("unknown key %s.%s", path, k)
+			return nil, fmt.Errorf("unknown key in %s", path)
 		}
 	}
 	return m, nil
@@ -181,6 +184,34 @@ func match(v interface{}, path string, pattern *regexp.Regexp) error {
 	s, ok := v.(string)
 	if !ok || !pattern.MatchString(s) {
 		return fmt.Errorf("invalid %s", path)
+	}
+	return nil
+}
+
+// validateImage accepts a conservative OCI repository name pinned by sha256.
+func validateImage(v interface{}, path string) error {
+	s, ok := v.(string)
+	if !ok || len(s) > 512 {
+		return fmt.Errorf("invalid %s", path)
+	}
+	parts := strings.Split(s, "@sha256:")
+	if len(parts) != 2 || len(parts[0]) > 255 || !sha256Pattern.MatchString(parts[1]) {
+		return fmt.Errorf("invalid %s", path)
+	}
+	components := strings.Split(parts[0], "/")
+	if len(components) < 2 || !registryPattern.MatchString(components[0]) {
+		return fmt.Errorf("invalid %s", path)
+	}
+	if i := strings.LastIndexByte(components[0], ':'); i >= 0 {
+		port, err := strconv.Atoi(components[0][i+1:])
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("invalid %s", path)
+		}
+	}
+	for _, component := range components[1:] {
+		if !imageComponentPattern.MatchString(component) {
+			return fmt.Errorf("invalid %s", path)
+		}
 	}
 	return nil
 }
@@ -195,8 +226,17 @@ func validateSnapshot(v interface{}) error {
 		return fmt.Errorf("invalid snapshot.url")
 	}
 	u, err := url.Parse(s)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
 		return fmt.Errorf("invalid snapshot.url")
+	}
+	if strings.HasSuffix(u.Host, ":") {
+		return fmt.Errorf("invalid snapshot.url")
+	}
+	if p := u.Port(); p != "" {
+		port, err := strconv.Atoi(p)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("invalid snapshot.url")
+		}
 	}
 	return match(m["signing_key_fingerprint"], "snapshot.signing_key_fingerprint", keyPattern)
 }
