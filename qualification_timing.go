@@ -45,7 +45,7 @@ func (s *qualificationTimingStore) begin() *qualificationTiming {
 	s.requests++
 	sequence := s.requests
 	s.mu.Unlock()
-	return &qualificationTiming{store: s, entered: time.Now(), record: qualificationTimingRecord{RequestSequence: sequence}}
+	return &qualificationTiming{store: s, record: qualificationTimingRecord{RequestSequence: sequence}}
 }
 
 func (s *qualificationTimingStore) publish(r qualificationTimingRecord) {
@@ -79,7 +79,7 @@ type qualificationTimingKey struct{}
 type qualificationTiming struct {
 	store             *qualificationTimingStore
 	record            qualificationTimingRecord
-	entered           time.Time
+	queueStart        time.Time
 	admitted          time.Time
 	transformStart    time.Time
 	transformSegments int
@@ -207,9 +207,6 @@ func qualificationTimingMiddleware(enabled bool, store *qualificationTimingStore
 			if !returned && !t.published {
 				t.status = 3
 				t.abnormal = true
-			}
-			if !t.published && t.record.QueueNS == nil {
-				t.record.QueueNS = qualificationDuration(t.entered)
 			}
 			t.finish(r)
 		}()

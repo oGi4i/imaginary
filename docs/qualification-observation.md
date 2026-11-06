@@ -51,7 +51,9 @@ source/preflight excludes source cleanup. Processing equals transform/output plu
 cleanup when both exist; it excludes response transfer. Publication follows
 cleanup and precedes gate promotion. Request sequence is assigned at entry to the
 observed image route, before URL-signature validation and the image gate. A
-pre-gate rejection has no cleanup duration. Completion order can differ. `overwrite_total` counts ring turnover, not
+pre-gate rejection has no queue or cleanup duration. Queue timing starts when the
+request enters the image gate and excludes earlier signature validation.
+Completion order can differ. `overwrite_total` counts ring turnover, not
 lost collector data. A collector detects lost unread records with its completion
 cursor and the oldest retained completion sequence, not request sequence gaps.
 The JSON snapshot is limited to 32 KiB and carries an exact `Content-Length`.

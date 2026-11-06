@@ -67,9 +67,19 @@ func (g *imageGate) Wrap(next http.Handler) http.Handler {
 
 func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var timing *qualificationTiming
+		if observed {
+			timing = qualificationTimingFrom(r)
+			if timing != nil {
+				timing.queueStart = time.Now()
+			}
+		}
 		g.mu.Lock()
 		if r.Context().Err() != nil {
 			g.mu.Unlock()
+			if timing != nil {
+				timing.record.QueueNS = qualificationDuration(timing.queueStart)
+			}
 			return
 		}
 		if !g.active {
@@ -78,10 +88,9 @@ func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 		} else {
 			if g.waiter != nil {
 				g.mu.Unlock()
-				if observed {
-					if t := qualificationTimingFrom(r); t != nil {
-						t.status = 2
-					}
+				if timing != nil {
+					timing.status = 2
+					timing.record.QueueNS = qualificationDuration(timing.queueStart)
 				}
 				imageUnavailable(w)
 				return
@@ -110,20 +119,18 @@ func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 			}
 			g.mu.Unlock()
 			if cancelled || timedOut {
-				if timedOut && !cancelled {
-					if observed {
-						if t := qualificationTimingFrom(r); t != nil {
-							t.status = 2
-						}
+				if timing != nil {
+					timing.record.QueueNS = qualificationDuration(timing.queueStart)
+					if timedOut && !cancelled {
+						timing.status = 2
 					}
+				}
+				if timedOut && !cancelled {
 					imageUnavailable(w)
 				}
 				if promoted {
-					if observed {
-						if t := qualificationTimingFrom(r); t != nil {
-							t.record.QueueNS = qualificationDuration(t.entered)
-							t.finish(r)
-						}
+					if timing != nil {
+						timing.finish(r)
 					}
 					g.release()
 				}
@@ -131,13 +138,9 @@ func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 			}
 		}
 
-		var timing *qualificationTiming
-		if observed {
-			timing = qualificationTimingFrom(r)
-			if timing != nil {
-				timing.admitted = time.Now()
-				timing.record.QueueNS = qualificationDuration(timing.entered)
-			}
+		if timing != nil {
+			timing.admitted = time.Now()
+			timing.record.QueueNS = qualificationDuration(timing.queueStart)
 		}
 		returned := false
 		defer func() {
