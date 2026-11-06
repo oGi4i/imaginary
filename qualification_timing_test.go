@@ -322,6 +322,46 @@ func TestQualificationLifecycleAuthPlaceholderIsRejection(t *testing.T) {
 	}
 }
 
+func TestQualificationLifecycleURLSignatureRejection(t *testing.T) {
+	placeholder, err := ioutil.ReadFile("testdata/large.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := qualificationTimings.snapshot().LatestCompletionSequence
+	o := ServerOptions{QualSnapshot: true, EnableURLSignature: true, URLSignatureKey: "secret", EnablePlaceholder: true, PlaceholderImage: placeholder, PlaceholderStatus: http.StatusOK}
+	h := ImageMiddleware(o)(func([]byte, ImageOptions) (Image, error) {
+		t.Fatal("invalid signature reached operation")
+		return Image{}, nil
+	})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/resize?width=64&height=64&sign=invalid", nil))
+	got := qualificationTimings.snapshot()
+	if w.Code != http.StatusOK || w.Body.Len() == 0 || got.LatestCompletionSequence != before+1 {
+		t.Fatalf("missing signature rejection record: status=%d snapshot=%+v", w.Code, got)
+	}
+	record := got.Records[len(got.Records)-1]
+	if record.Status != 2 || record.CleanupNS != nil {
+		t.Fatalf("invalid signature outcome: %+v", record)
+	}
+}
+
+func TestQualificationLifecycleOutsideGatePanic(t *testing.T) {
+	store := newQualificationTimingStore()
+	h := qualificationTimingMiddleware(true, store, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(nil)
+	}))
+	returned := false
+	func() {
+		defer func() { _ = recover() }()
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil))
+		returned = true
+	}()
+	got := store.snapshot()
+	if returned || len(got.Records) != 1 || got.Records[0].Status != 3 {
+		t.Fatalf("panic must propagate and record error: returned=%t records=%+v", returned, got)
+	}
+}
+
 func TestQualificationLifecycleBrokenAuthPlaceholderIsError(t *testing.T) {
 	store := newQualificationTimingStore()
 	o := ServerOptions{QualSnapshot: true, APIKey: "required", EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: http.StatusOK}
