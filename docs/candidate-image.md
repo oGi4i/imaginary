@@ -8,6 +8,29 @@ The comparison target is Imaginary 1.2.4, bimg 1.1.4, libvips 8.10.0 and glibc 2
 
 The existing Dockerfile uses a Go 1.14 builder and `debian:buster-slim` runtime, downloads the libvips release, and installs native build and runtime packages. Its image tags, package repositories and package versions are mutable. It is not a reproducible recipe. Its package list is a starting point, not proof of the installed reference-image versions, enabled loaders, or complete transitive dependency closure.
 
+## Input lock validation
+
+`docs/runtime-image.lock.yaml` is the single input lock. It uses strict JSON, a
+YAML subset; YAML-only syntax is not accepted. Unknown inputs are explicitly
+`null`, not floating values. The known source fields identify the comparison
+baseline, not the fork commit or build recipe. Record the actual source and
+recipe identities externally in each build's provenance to avoid a
+self-referential lock.
+
+The standard-library-only `cmd/source-lock` validates the lock structure and
+lists unresolved fields. In an authorized Go environment, invoke it as
+`go run ./cmd/source-lock docs/runtime-image.lock.yaml`. It exits nonzero for
+invalid or unresolved inputs. The parser rejects duplicate and unknown keys,
+invalid identities and dangling package dependencies. The package arrays
+represent separate build and runtime closures; each package names its direct
+dependencies within the same closure. An empty dependency array means a package
+has no dependencies; a missing dependency list is invalid. Unknown closures
+remain `null`, not empty arrays. The JSON input limit is 1 MiB.
+
+Structural completeness does not authenticate any input, establish a complete
+closure, verify features, prove reproducibility, or authorize execution. Those
+checks and approval gates are separate and not implemented by this validator.
+
 ## Proposed build sequence
 
 Once the missing inputs and execution are approved, implement one multi-stage image build on GitHub-hosted runners. Do not execute it locally. Use the same target architecture, Debian Buster snapshot and locked native dependency versions in both stages. Pin the actual platform-specific image manifests, not only multi-platform tags. A Go builder must support the chosen source and target glibc 2.28; verify this rather than assuming that an arbitrary Go image has the correct Debian release.

@@ -45,6 +45,26 @@ func TestRunListsUnresolvedLocks(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotReflectPrivateInput(t *testing.T) {
+	const private = "private-marker"
+	invalid := filepath.Join(t.TempDir(), "invalid.yaml")
+	input := strings.Replace(incompleteLock, `"schema_version": 1`, `"private-marker\nlog-injection": true, "schema_version": 1`, 1)
+	if err := os.WriteFile(invalid, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "private-marker\nlog-injection")
+	for _, path := range []string{invalid, missing} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{path}, &stdout, &stderr); code == 0 {
+			t.Fatal("invalid input succeeded")
+		}
+		output := stdout.String() + stderr.String()
+		if strings.Contains(output, private) || strings.Contains(output, "log-injection") {
+			t.Fatalf("output reflects private input: %q", output)
+		}
+	}
+}
+
 func TestRunRejectsInvalidInput(t *testing.T) {
 	invalid := filepath.Join(t.TempDir(), "invalid.yaml")
 	if err := os.WriteFile(invalid, []byte(`{"schema_version": 1, "schema_version": 1}`), 0600); err != nil {

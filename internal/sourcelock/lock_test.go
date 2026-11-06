@@ -62,6 +62,22 @@ func TestValidateCompleteAndUnresolved(t *testing.T) {
 	}
 }
 
+func TestValidateDoesNotReflectUnknownOrDuplicateKeys(t *testing.T) {
+	const private = "private-marker"
+	for _, input := range []string{
+		replaceOnce(t, completeLock, `"schema_version": 1`, `"private-marker\nlog-injection": true, "schema_version": 1`),
+		replaceOnce(t, completeLock, `"schema_version": 1`, `"private-marker\nlog-injection": true, "private-marker\nlog-injection": true, "schema_version": 1`),
+	} {
+		_, err := Validate(strings.NewReader(input))
+		if err == nil {
+			t.Fatal("accepted unknown or duplicate key")
+		}
+		if strings.Contains(err.Error(), private) || strings.Contains(err.Error(), "log-injection") || strings.Contains(err.Error(), "\n") {
+			t.Fatalf("error reflects input: %q", err)
+		}
+	}
+}
+
 func TestValidateRejectsInvalidLocks(t *testing.T) {
 	cases := []struct {
 		name string
@@ -73,6 +89,7 @@ func TestValidateRejectsInvalidLocks(t *testing.T) {
 		{"unknown array object", `"name": "build-a"`, `"extra": 1, "name": "build-a"`},
 		{"duplicate root", `"schema_version": 1`, `"schema_version": 1, "schema_version": 1`},
 		{"duplicate nested key", `"bimg_version": "1.1.4"`, `"bimg_version": "1.1.4", "bimg_version": "1.1.4"`},
+		{"case variant key", `"bimg_version": "1.1.4"`, `"BIMG_VERSION": "1.1.4"`},
 		{"duplicate package key", `"name": "build-a"`, `"name": "build-a", "name": "build-a"`},
 		{"missing required key", `"platform": "linux/amd64",`, ``},
 		{"null source", `"source": {"upstream_commit": "9357624e976790905f1b1bf4d059f8643c21e6fb", "bimg_version": "1.1.4"}`, `"source": null`},
@@ -85,6 +102,8 @@ func TestValidateRejectsInvalidLocks(t *testing.T) {
 		{"different archive", `1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9`, `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`},
 		{"bad package hash", `cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc`, `not-a-sha256`},
 		{"floating image", `example.test/builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, `example.test/builder:latest`},
+		{"image empty component", `example.test/builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, `example.test//builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`},
+		{"snapshot without hostname", `https://example.test/snapshot/`, `https://:443/`},
 		{"bad platform", `linux/amd64`, `linux/`},
 		{"empty reference", `"depends_on": ["build-b"]`, `"depends_on": [""]`},
 		{"dangling reference", `"depends_on": ["build-b"]`, `"depends_on": ["absent"]`},

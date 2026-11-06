@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source": {
+    "upstream_commit": "9357624e976790905f1b1bf4d059f8643c21e6fb",
+    "bimg_version": "1.1.4"
+  },
+  "libvips": {
+    "version": "8.10.0",
+    "archive_sha256": "1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9"
+  },
+  "platform": null,
+  "builder_image": null,
+  "runtime_image": null,
+  "snapshot": null,
+  "build_packages": null,
+  "runtime_packages": null,
+  "go_toolchain": null,
+  "build_tools": null,
+  "features": null
+}
