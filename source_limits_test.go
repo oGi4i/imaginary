@@ -377,6 +377,62 @@ func TestRasterSourceRejectsWatermarkImageBeforeFetch(t *testing.T) {
 	}
 }
 
+func TestRasterSourcePipelineRejectsWatermarkBeforeOtherValidation(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		_, _ = w.Write(rasterTestPNG(1, 1))
+	}))
+	defer server.Close()
+
+	for _, first := range []map[string]interface{}{
+		{"operation": "resize", "params": map[string]interface{}{"quality": strings.Repeat("invalid", 1024)}},
+		{"operation": "unsupported"},
+	} {
+		for _, ignoreFailure := range []bool{false, true} {
+			t.Run(first["operation"].(string)+"/ignore="+strconv.FormatBool(ignoreFailure), func(t *testing.T) {
+				operations, err := json.Marshal([]map[string]interface{}{
+					first,
+					{"operation": "watermarkImage", "ignore_failure": ignoreFailure, "params": map[string]interface{}{"image": server.URL}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				response := httptest.NewRecorder()
+				request := httptest.NewRequest(http.MethodPost, "/pipeline?"+url.Values{"operations": {string(operations)}}.Encode(), nil)
+				imageHandler(response, request, rasterTestPNG(1, 1), Pipeline, ServerOptions{EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: 299})
+				if response.Code != http.StatusNotAcceptable || response.Header().Get("Content-Type") != "application/json" || response.Body.String() != string(errExcludedWatermark.JSON()) {
+					t.Fatalf("status = %d, type = %q, body = %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+				}
+				if got := atomic.LoadInt32(&requests); got != 0 {
+					t.Fatalf("watermark server received %d requests", got)
+				}
+			})
+		}
+	}
+}
+
+func TestRasterSourcePipelineInvalidParamsBypassPlaceholder(t *testing.T) {
+	for _, ignoreFailure := range []bool{false, true} {
+		t.Run(strconv.FormatBool(ignoreFailure), func(t *testing.T) {
+			operations, err := json.Marshal([]map[string]interface{}{{
+				"operation": "resize", "ignore_failure": ignoreFailure,
+				"params": map[string]interface{}{"quality": strings.Repeat("invalid", 1024)},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/pipeline?"+url.Values{"operations": {string(operations)}}.Encode(), nil)
+			imageHandler(response, request, rasterTestPNG(1, 1), Pipeline, ServerOptions{EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: 299})
+			want := NewError("Invalid pipeline parameters", http.StatusBadRequest)
+			if response.Code != http.StatusBadRequest || response.Header().Get("Content-Type") != "application/json" || response.Body.String() != string(want.JSON()) {
+				t.Fatalf("status = %d, type = %q, body = %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+		})
+	}
+}
+
 func TestRasterSourceInvalidParamsBypassPlaceholder(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
