@@ -46,7 +46,8 @@ A default-off, read-only qualification snapshot listener is available only on
 the application listener. Cgroup identity is unproven and cgroup data is
 unavailable; this partial interface cannot qualify memory. See
 [qualification observations](docs/qualification-observation.md). The listener
-also retains bounded numeric lifecycle observations when enabled.
+also retains bounded numeric lifecycle observations when enabled. Image responses
+include `X-Imaginary-Request-Sequence` only when qualification is enabled.
 
 The strict JSON-compatible YAML [runtime lock](docs/runtime-image.lock.yaml)
 and source-lock CLI validate structure and list unresolved inputs. They do not

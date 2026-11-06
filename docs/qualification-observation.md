@@ -50,8 +50,13 @@ native placeholder segments. Cleanup sums multipart source and gate cleanup;
 source/preflight excludes source cleanup. Processing equals transform/output plus
 cleanup when both exist; it excludes response transfer. Publication follows
 cleanup and precedes gate promotion. Request sequence is assigned at entry to the
-observed image route, before URL-signature validation and the image gate. A
-pre-gate rejection has no queue or cleanup duration. Queue timing starts when the
+observed image route, before URL-signature validation and the image gate. When
+enabled, the image response header `X-Imaginary-Request-Sequence` contains that
+sequence as an unsigned decimal integer. Match it with the snapshot's
+`process_lifetime` and a completed record's `request_sequence`. The header is
+not authentication or provenance; a cancelled request can finish without the
+client receiving response headers, so its link is unavailable. Disabled mode
+adds no sequence header. A pre-gate rejection has no queue or cleanup duration. Queue timing starts when the
 request enters the image gate and excludes earlier signature validation.
 Completion order can differ. `overwrite_total` counts ring turnover, not
 lost collector data. A collector detects lost unread records with its completion

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -201,6 +202,7 @@ func qualificationTimingMiddleware(enabled bool, store *qualificationTimingStore
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t := store.begin()
+		w.Header().Set("X-Imaginary-Request-Sequence", strconv.FormatUint(t.record.RequestSequence, 10))
 		r = r.WithContext(context.WithValue(r.Context(), qualificationTimingKey{}, t))
 		returned := false
 		defer func() {
