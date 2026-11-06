@@ -103,8 +103,8 @@ func imageHandler(w http.ResponseWriter, r *http.Request, buf []byte, operation 
 
 	image, err := operation.Run(buf, opts)
 	if err != nil {
-		if err == errExcludedWatermark {
-			ErrorReply(r, w, errExcludedWatermark, ServerOptions{})
+		if err == errExcludedWatermark || err == errInvalidPipelineParams {
+			ErrorReply(r, w, err.(Error), ServerOptions{})
 			return
 		}
 		ErrorReply(r, w, NewError("Error while processing the image: "+err.Error(), http.StatusBadRequest), o)

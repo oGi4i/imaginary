@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"net/http"
 	"strings"
@@ -31,6 +30,8 @@ var OperationsMap = map[string]Operation{
 	"smartcrop":      SmartCrop,
 	"fit":            Fit,
 }
+
+var errInvalidPipelineParams = NewError("Invalid pipeline parameters", http.StatusBadRequest)
 
 // Image stores an image binary buffer and its MIME type
 type Image struct {
@@ -338,29 +339,29 @@ func GaussianBlur(buf []byte, o ImageOptions) (Image, error) {
 }
 
 func Pipeline(buf []byte, o ImageOptions) (Image, error) {
-	if len(o.Operations) == 0 {
-		return Image{}, NewError("Missing or invalid pipeline operations JSON", http.StatusBadRequest)
+	// Exclude every secondary source before any other validation can fail.
+	for _, operation := range o.Operations {
+		if operation.Name == "watermarkImage" {
+			return Image{}, errExcludedWatermark
+		}
 	}
-	if len(o.Operations) > 10 {
-		return Image{}, NewError("Maximum allowed pipeline operations exceeded", http.StatusBadRequest)
+	if len(o.Operations) == 0 || len(o.Operations) > 10 {
+		return Image{}, errInvalidPipelineParams
 	}
 
 	// Validate and built operations
 	for i, operation := range o.Operations {
-		if operation.Name == "watermarkImage" {
-			return Image{}, errExcludedWatermark
-		}
 		// Validate supported operation name
 		var exists bool
 		if operation.Operation, exists = OperationsMap[operation.Name]; !exists {
-			return Image{}, NewError(fmt.Sprintf("Unsupported operation name: %s", operation.Name), http.StatusBadRequest)
+			return Image{}, errInvalidPipelineParams
 		}
 
 		// Parse and construct operation options
 		var err error
 		operation.ImageOptions, err = buildParamsFromOperation(operation)
 		if err != nil {
-			return Image{}, err
+			return Image{}, errInvalidPipelineParams
 		}
 
 		// Mutate list by value

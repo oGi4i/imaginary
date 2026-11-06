@@ -13,7 +13,10 @@ malformed or unrecognized data, 406 for excluded formats or animation, and 413
 for a source over the pixel limit. These responses bypass the native placeholder.
 
 Image watermarks are disabled for this candidate, including inside pipelines;
-the service returns HTTP 406 without fetching the secondary source.
+the service returns HTTP 406 without fetching the secondary source. Pipelines
+check every operation for image watermarks before other pipeline validation.
+Other pipeline validation failures return fixed JSON HTTP 400 without a native
+placeholder or reflected parameter values.
 
 This is not a complete native-memory bound. Output enlargement and intermediate
 pipeline images are not covered by the source-pixel check. Their work budget and
