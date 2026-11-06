@@ -202,12 +202,18 @@ func qualificationTimingMiddleware(enabled bool, store *qualificationTimingStore
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t := store.begin()
 		r = r.WithContext(context.WithValue(r.Context(), qualificationTimingKey{}, t))
+		returned := false
 		defer func() {
+			if !returned && !t.published {
+				t.status = 3
+				t.abnormal = true
+			}
 			if !t.published && t.record.QueueNS == nil {
 				t.record.QueueNS = qualificationDuration(t.entered)
 			}
 			t.finish(r)
 		}()
 		next.ServeHTTP(&qualificationTimingWriter{ResponseWriter: w, timing: t}, r)
+		returned = true
 	})
 }

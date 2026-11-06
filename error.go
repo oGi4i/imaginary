@@ -88,6 +88,9 @@ func replyWithPlaceholder(req *http.Request, w http.ResponseWriter, errCaller Er
 		qualificationTimingTransformDone(req)
 	}
 	if err != nil {
+		if o.QualSnapshot {
+			qualificationTimingError(req, err)
+		}
 		sendErrorResponse(w, http.StatusBadRequest, err)
 		return err
 	}
@@ -109,6 +112,15 @@ func replyWithPlaceholder(req *http.Request, w http.ResponseWriter, errCaller Er
 }
 
 func ErrorReply(req *http.Request, w http.ResponseWriter, err Error, o ServerOptions) {
+	if o.QualSnapshot {
+		if t := qualificationTimingFrom(req); t != nil && t.status != 3 && !t.abnormal {
+			if err.HTTPCode() >= http.StatusInternalServerError {
+				t.status = 3
+			} else {
+				t.status = 2
+			}
+		}
+	}
 	// Reply with placeholder if required
 	if o.EnablePlaceholder || o.Placeholder != "" {
 		_ = replyWithPlaceholder(req, w, err, o)
