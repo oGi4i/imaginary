@@ -1,7 +1,7 @@
 package main
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -24,20 +24,39 @@ func (s *BodyImageSource) Matches(r *http.Request) bool {
 }
 
 func (s *BodyImageSource) GetImage(r *http.Request) ([]byte, error) {
-	if isFormBody(r) {
-		return readFormBody(r)
+	if r.Body == nil {
+		return nil, ErrEmptyBody
 	}
-	return readRawBody(r)
+	limit := maxBodyBytes(s.Config.MaxBodyBytes)
+	// Keep direct source callers bounded too, not just ImageMiddleware callers.
+	r.Body = http.MaxBytesReader(nil, r.Body, limit)
+	if isFormBody(r) {
+		return readFormBody(r, limit)
+	}
+	return readRawBody(r, limit)
 }
 
 func isFormBody(r *http.Request) bool {
 	return strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/")
 }
 
-func readFormBody(r *http.Request) ([]byte, error) {
-	err := r.ParseMultipartForm(maxMemory)
-	if err != nil {
-		return nil, err
+func readFormBody(r *http.Request, limit int64) ([]byte, error) {
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+	memory := maxMemory
+	if limit < memory {
+		memory = limit
+	}
+	if err := r.ParseMultipartForm(memory); err != nil {
+		return nil, bodyReadError(err)
+	}
+	// A multipart parser can stop at the final boundary before the HTTP body ends.
+	// Check the bounded remainder too, so epilogues cannot bypass the total cap.
+	if _, err := io.Copy(io.Discard, sourceContextReader{r.Context(), r.Body}); err != nil {
+		return nil, bodyReadError(err)
 	}
 
 	file, _, err := r.FormFile(formFieldName)
@@ -46,16 +65,15 @@ func readFormBody(r *http.Request) ([]byte, error) {
 	}
 	defer file.Close()
 
-	buf, err := ioutil.ReadAll(file)
-	if len(buf) == 0 {
+	buf, err := readSourceBytes(r.Context(), file, limit)
+	if err == nil && len(buf) == 0 {
 		err = ErrEmptyBody
 	}
-
 	return buf, err
 }
 
-func readRawBody(r *http.Request) ([]byte, error) {
-	return ioutil.ReadAll(r.Body)
+func readRawBody(r *http.Request, limit int64) ([]byte, error) {
+	return readSourceBytes(r.Context(), r.Body, limit)
 }
 
 func init() {

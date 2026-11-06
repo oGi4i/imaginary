@@ -17,8 +17,11 @@ Health and version requests must not wait behind image work.
 and a 30-second queue timeout. Multipart cleanup runs before promotion.
 Source admission accepts single-frame JPEG, PNG and WebP with a provisional
 16,000,000-pixel default; see `docs/source-limits.md`. Image watermarks are
-disabled. Source-byte and output/intermediate work limits are incomplete; do not
-treat these controls as a qualified OOM-prevention policy.
+disabled. `-max-body-bytes` bounds actual raw/multipart bodies and HTTP/filesystem
+source reads after gate admission; its 16 MiB default is provisional. Rejections
+return fixed JSON 413 without a placeholder; see `docs/body-limits.md`.
+Output/intermediate work limits are incomplete. Do not treat these controls as
+a qualified OOM-prevention policy.
 
 `native_cache.go` disables the operation cache with `bimg.VipsCacheSetMax(0)`
 in package initialization, after bimg/libvips initialization and before requests.

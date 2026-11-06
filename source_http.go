@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -66,9 +65,12 @@ func (s *HTTPImageSource) fetchImage(url *url.URL, ireq *http.Request) ([]byte, 
 	}
 
 	// Read the body
-	buf, err := ioutil.ReadAll(res.Body)
+	buf, err := readSourceBytes(ireq.Context(), res.Body, s.Config.MaxBodyBytes)
+	if err == ErrMaxBodySize {
+		return nil, err
+	}
 	if err != nil {
-		return nil, fmt.Errorf("unable to create image from response body: %s (url=%s)", req.URL.String(), err)
+		return nil, fmt.Errorf("unable to create image from response body (url=%s): %w", req.URL.String(), err)
 	}
 	return buf, nil
 }
@@ -100,7 +102,7 @@ func parseURL(request *http.Request) (*url.URL, error) {
 }
 
 func newHTTPRequest(s *HTTPImageSource, ireq *http.Request, method string, url *url.URL) *http.Request {
-	req, _ := http.NewRequest(method, url.String(), nil)
+	req, _ := http.NewRequestWithContext(ireq.Context(), method, url.String(), nil)
 	req.Header.Set("User-Agent", "imaginary/"+Version)
 	req.URL = url
 

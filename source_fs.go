@@ -1,8 +1,9 @@
 package main
 
 import (
-	"io/ioutil"
+	"context"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 )
@@ -32,7 +33,7 @@ func (s *FileSystemImageSource) GetImage(r *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	return s.read(file)
+	return s.read(r.Context(), file)
 }
 
 func (s *FileSystemImageSource) buildPath(file string) (string, error) {
@@ -43,12 +44,18 @@ func (s *FileSystemImageSource) buildPath(file string) (string, error) {
 	return file, nil
 }
 
-func (s *FileSystemImageSource) read(file string) ([]byte, error) {
-	buf, err := ioutil.ReadFile(file)
+func (s *FileSystemImageSource) read(ctx context.Context, file string) ([]byte, error) {
+	source, err := os.Open(file)
 	if err != nil {
 		return nil, ErrInvalidFilePath
 	}
-	return buf, nil
+	defer source.Close()
+
+	buf, err := readSourceBytes(ctx, source, s.Config.MaxBodyBytes)
+	if err != nil && err != ErrMaxBodySize {
+		return nil, ErrInvalidFilePath
+	}
+	return buf, err
 }
 
 func (s *FileSystemImageSource) getFileParam(r *http.Request) string {

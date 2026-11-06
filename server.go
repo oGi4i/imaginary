@@ -22,6 +22,7 @@ type ServerOptions struct {
 	HTTPReadTimeout    int
 	HTTPWriteTimeout   int
 	MaxAllowedSize     int
+	MaxBodyBytes       int64
 	MaxSourcePixels    int64
 	CORS               bool
 	Gzip               bool // deprecated

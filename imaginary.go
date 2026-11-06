@@ -33,6 +33,7 @@ var (
 	aURLSignatureKey    = flag.String("url-signature-key", "", "The URL signature key (32 characters minimum)")
 	aAllowedOrigins     = flag.String("allowed-origins", "", "Restrict remote image source processing to certain origins (separated by commas). Note: Origins are validated against host *AND* path.")
 	aMaxAllowedSize     = flag.Int("max-allowed-size", 0, "Restrict maximum size of http image source (in bytes)")
+	aMaxBodyBytes       = flag.Int64("max-body-bytes", defaultMaxBodyBytes, "Maximum image source bytes, including multipart framing (provisional, not qualified)")
 	aMaxSourcePixels    = flag.Int64("max-source-pixels", defaultMaxSourcePixels, "Maximum source pixels (provisional, not qualified)")
 	aKey                = flag.String("key", "", "Define API key for authorization")
 	aMount              = flag.String("mount", "", "Mount server local directory")
@@ -95,6 +96,7 @@ Options:
   -url-signature-key         The URL signature key (32 characters minimum)
   -allowed-origins <urls>    Restrict remote image source processing to certain origins (separated by commas)
   -max-allowed-size <bytes>  Restrict maximum size of http image source (in bytes)
+  -max-body-bytes <bytes>    Image source byte limit [default: 16777216, provisional; nonpositive uses default]
   -max-source-pixels <num>   Source pixel limit [default: 16000000, provisional]
   -certfile <path>           TLS certificate file path
   -keyfile <path>            TLS private key file path
@@ -158,6 +160,7 @@ func main() {
 		ForwardHeaders:     parseForwardHeaders(*aForwardHeaders),
 		AllowedOrigins:     parseOrigins(*aAllowedOrigins),
 		MaxAllowedSize:     *aMaxAllowedSize,
+		MaxBodyBytes:       *aMaxBodyBytes,
 		MaxSourcePixels:    *aMaxSourcePixels,
 		LogLevel:           getLogLevel(*aLogLevel),
 	}

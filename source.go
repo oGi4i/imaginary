@@ -16,6 +16,7 @@ type SourceConfig struct {
 	ForwardHeaders []string
 	AllowedOrigins []*url.URL
 	MaxAllowedSize int
+	MaxBodyBytes   int64
 }
 
 var imageSourceMap = make(map[ImageSourceType]ImageSource)
@@ -39,6 +40,7 @@ func LoadSources(o ServerOptions) {
 			Authorization:  o.Authorization,
 			AllowedOrigins: o.AllowedOrigins,
 			MaxAllowedSize: o.MaxAllowedSize,
+			MaxBodyBytes:   maxBodyBytes(o.MaxBodyBytes),
 			ForwardHeaders: o.ForwardHeaders,
 		})
 	}

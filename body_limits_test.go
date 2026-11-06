@@ -11,8 +11,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
-	"reflect"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -29,17 +30,9 @@ func bodyLimitPNG(t *testing.T) []byte {
 	return data
 }
 
-// Reflection keeps the red-phase tests buildable before the new option exists.
 func bodyLimitOptions(t *testing.T, limit int64) ServerOptions {
 	t.Helper()
-	o := ServerOptions{}
-	field := reflect.ValueOf(&o).Elem().FieldByName("MaxBodyBytes")
-	if !field.IsValid() || field.Kind() != reflect.Int64 || !field.CanSet() {
-		t.Errorf("ServerOptions.MaxBodyBytes int64 is missing")
-		return o
-	}
-	field.SetInt(limit)
-	return o
+	return ServerOptions{MaxBodyBytes: limit}
 }
 
 func bodyLimitHandler(o ServerOptions, calls *int32) http.Handler {
@@ -256,6 +249,179 @@ func TestBodyLimitMultipartWholeBodyAndCleanup(t *testing.T) {
 				t.Errorf("multipart temporary files remain: %v", entries)
 			}
 		})
+	}
+}
+
+func TestBodyLimitReaderBoundariesAndFailures(t *testing.T) {
+	const limit = int64(8)
+	for _, size := range []int{0, 7, 8, 9, 1024} {
+		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
+			payload := bytes.Repeat([]byte{'x'}, size)
+			reader := &bodyLimitCountingReader{reader: bytes.NewReader(payload)}
+			got, err := readSourceBytes(context.Background(), reader, limit)
+			if size > int(limit) {
+				if err != ErrMaxBodySize || got != nil {
+					t.Fatalf("got %q, %v; want nil, ErrMaxBodySize", got, err)
+				}
+			} else if err != nil || !bytes.Equal(got, payload) {
+				t.Fatalf("got %q, %v; want %q, nil", got, err, payload)
+			}
+			if reader.bytes > limit+1 {
+				t.Fatalf("read %d bytes, want at most %d", reader.bytes, limit+1)
+			}
+		})
+	}
+	failure := errors.New("read failure")
+	got, err := readSourceBytes(context.Background(), &bodyLimitErrorReader{prefix: []byte("partial"), err: failure}, limit)
+	if got != nil || !errors.Is(err, failure) {
+		t.Fatalf("read failure = %q, %v; want nil and original error", got, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reader := &bodyLimitCountingReader{reader: strings.NewReader("ignored")}
+	got, err = readSourceBytes(ctx, reader, limit)
+	if got != nil || !errors.Is(err, context.Canceled) || reader.reads != 0 {
+		t.Fatalf("cancelled read = %q, %v; reads = %d", got, err, reader.reads)
+	}
+	if maxBodyBytes(0) != 16<<20 || maxBodyBytes(-1) != 16<<20 {
+		t.Fatal("nonpositive cap must use the provisional 16 MiB default")
+	}
+	got, err = readSourceBytes(context.Background(), strings.NewReader("small"), int64(1<<63-1))
+	if err != nil || string(got) != "small" {
+		t.Fatalf("MaxInt64 cap overflow: %q, %v", got, err)
+	}
+}
+
+func TestBodyLimitDirectSources(t *testing.T) {
+	for _, kind := range []string{"raw", "multipart", "http", "fs"} {
+		for _, delta := range []int{-1, 0, 1, 1024} {
+			t.Run(fmt.Sprintf("%s/%+d", kind, delta), func(t *testing.T) {
+				payload := []byte("12345678")
+				if delta > 0 {
+					payload = append(payload, bytes.Repeat([]byte{'x'}, delta)...)
+				}
+				limit := int64(8)
+				if delta < 0 {
+					limit++
+				}
+				config := &SourceConfig{MaxBodyBytes: limit}
+				var source ImageSource
+				var request *http.Request
+				switch kind {
+				case "raw":
+					source = NewBodyImageSource(config)
+					request = httptest.NewRequest(http.MethodPost, "/resize", bytes.NewReader(payload))
+				case "multipart":
+					body, contentType := bodyLimitMultipart(t, payload)
+					config.MaxBodyBytes = int64(len(body) - delta)
+					source = NewBodyImageSource(config)
+					request = httptest.NewRequest(http.MethodPost, "/resize", bytes.NewReader(body))
+					request.Header.Set("Content-Type", contentType)
+				case "http":
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						// Force chunked transfer instead of the automatic Content-Length.
+						w.(http.Flusher).Flush()
+						_, _ = w.Write(payload)
+					}))
+					defer server.Close()
+					source = NewHTTPImageSource(config)
+					request = httptest.NewRequest(http.MethodGet, "/resize?url="+url.QueryEscape(server.URL), nil)
+				case "fs":
+					config.MountPath = t.TempDir()
+					if err := os.WriteFile(filepath.Join(config.MountPath, "image"), payload, 0600); err != nil {
+						t.Fatal(err)
+					}
+					source = NewFileSystemImageSource(config)
+					request = httptest.NewRequest(http.MethodGet, "/resize?file=image", nil)
+				}
+				got, err := source.GetImage(request)
+				if delta > 0 {
+					if err != ErrMaxBodySize || len(got) != 0 {
+						t.Fatalf("oversized source = %d bytes, %v; want no bytes and ErrMaxBodySize", len(got), err)
+					}
+				} else if err != nil || !bytes.Equal(got, payload) {
+					t.Fatalf("source = %q, %v; want %q, nil", got, err, payload)
+				}
+			})
+		}
+	}
+}
+
+func TestBodyLimitMultipartEpilogue(t *testing.T) {
+	payload, contentType := bodyLimitMultipart(t, bodyLimitPNG(t))
+	limit := int64(len(payload))
+	payload = append(payload, bytes.Repeat([]byte{'x'}, 1024)...)
+	var calls int32
+	handler := bodyLimitHandler(bodyLimitOptions(t, limit), &calls)
+	reader := &bodyLimitCountingReader{reader: bytes.NewReader(payload)}
+	request := httptest.NewRequest(http.MethodPost, "/resize", reader)
+	request.ContentLength = -1
+	request.Header.Set("Content-Type", contentType)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	bodyLimitCheck413(t, response)
+	if calls != 0 || reader.bytes > limit+1 {
+		t.Fatalf("operation calls = %d, read bytes = %d; want 0 and at most %d", calls, reader.bytes, limit+1)
+	}
+}
+
+func TestBodyLimitRemoteAndFileRejection(t *testing.T) {
+	png := bodyLimitPNG(t)
+	payload := append(append([]byte(nil), png...), 0)
+	for _, kind := range []string{"http", "fs"} {
+		t.Run(kind, func(t *testing.T) {
+			var calls int32
+			o := bodyLimitOptions(t, int64(len(png)))
+			o.EnablePlaceholder = true
+			o.PlaceholderStatus = http.StatusOK
+			path := "/resize"
+			if kind == "http" {
+				o.EnableURLSource = true
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = w.Write(payload)
+				}))
+				defer server.Close()
+				path += "?url=" + url.QueryEscape(server.URL)
+			} else {
+				o.Mount = t.TempDir()
+				if err := os.WriteFile(filepath.Join(o.Mount, "image"), payload, 0600); err != nil {
+					t.Fatal(err)
+				}
+				path += "?file=image"
+			}
+			handler := bodyLimitHandler(o, &calls)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			bodyLimitCheck413(t, response)
+			if calls != 0 {
+				t.Fatalf("oversized %s source reached operation %d times", kind, calls)
+			}
+		})
+	}
+}
+
+func TestBodyLimitMultipartTemporaryCleanup(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	payload, contentType := bodyLimitMultipart(t, bodyLimitPNG(t))
+	request := httptest.NewRequest(http.MethodPost, "/resize", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", contentType)
+	// Force a real disk-backed form at tiny sizes before exercising source cleanup.
+	if err := request.ParseMultipartForm(1); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = request.MultipartForm.RemoveAll() })
+	entries, err := os.ReadDir(tmp)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("multipart did not create a temporary file: %v, %v", entries, err)
+	}
+	source := NewBodyImageSource(&SourceConfig{MaxBodyBytes: int64(len(payload))})
+	if _, err := source.GetImage(request); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = os.ReadDir(tmp)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("multipart cleanup left files: %v, %v", entries, err)
 	}
 }
 

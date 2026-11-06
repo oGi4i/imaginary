@@ -143,8 +143,29 @@ func validateRasterPNG(buf []byte, max int64) error {
 			if seenIHDR || len(data) != 13 {
 				return errMalformedRaster
 			}
+			width, height := binary.BigEndian.Uint32(data), binary.BigEndian.Uint32(data[4:])
+			if width > 0x7fffffff || height > 0x7fffffff || data[10] != 0 || data[11] != 0 || data[12] > 1 {
+				return errMalformedRaster
+			}
+			depth := data[8]
+			switch data[9] {
+			case 0:
+				if depth != 1 && depth != 2 && depth != 4 && depth != 8 && depth != 16 {
+					return errMalformedRaster
+				}
+			case 2, 4, 6:
+				if depth != 8 && depth != 16 {
+					return errMalformedRaster
+				}
+			case 3:
+				if depth != 1 && depth != 2 && depth != 4 && depth != 8 {
+					return errMalformedRaster
+				}
+			default:
+				return errMalformedRaster
+			}
 			seenIHDR = true
-			pixels = rasterPixels(uint64(binary.BigEndian.Uint32(data)), uint64(binary.BigEndian.Uint32(data[4:])), max)
+			pixels = rasterPixels(uint64(width), uint64(height), max)
 			if pixels == errMalformedRaster {
 				return pixels
 			}

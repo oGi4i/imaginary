@@ -35,8 +35,11 @@ Source admission accepts only single-frame JPEG, PNG and WebP. The default
 16,000,000 source-pixel limit is provisional and not qualified. Image watermarks
 are disabled; output and intermediate work remain unbounded. See the
 [source policy](docs/source-limits.md) and [candidate image](docs/candidate-image.md).
-Source-byte limits are incomplete; the inherited `-max-allowed-size` flag does
-not bound raw POST bodies.
+The [source-byte policy](docs/body-limits.md) applies `-max-body-bytes` to
+actual raw/multipart request bodies and HTTP/filesystem source reads. Its 16 MiB
+default is provisional, not qualified. Oversized inputs return fixed JSON 413,
+without a placeholder. The inherited `-max-allowed-size` flag remains a separate
+HTTP HEAD precheck.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image
@@ -355,6 +358,7 @@ Options:
   -url-signature-key        The URL signature key (32 characters minimum)
   -allowed-origins <urls>   Restrict remote image source processing to certain origins (separated by commas). Note: Origins are validated against host *AND* path.
   -max-allowed-size <bytes> Restrict maximum size of http image source (in bytes)
+  -max-body-bytes <bytes>   Image source byte limit [default: 16777216, provisional; nonpositive uses default]
   -certfile <path>          TLS certificate file path
   -keyfile <path>           TLS private key file path
   -authorization <value>    Defines a constant Authorization header value passed to all the image source servers. -enable-url-source flag must be defined. This overwrites authorization headers forwarding behavior via X-Forward-Authorization

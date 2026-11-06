@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -137,11 +138,20 @@ func TestRasterSourcePNGHeaderFields(t *testing.T) {
 		status                                       int
 	}{
 		{"gray-1", 1, 0, 0, 0, 0, 0},
+		{"gray-2", 2, 0, 0, 0, 0, 0},
+		{"gray-4", 4, 0, 0, 0, 0, 0},
+		{"gray-8", 8, 0, 0, 0, 0, 0},
 		{"gray-16-interlaced", 16, 0, 0, 0, 1, 0},
 		{"rgb-8", 8, 2, 0, 0, 0, 0},
+		{"rgb-16", 16, 2, 0, 0, 0, 0},
+		{"indexed-1", 1, 3, 0, 0, 0, 0},
+		{"indexed-2", 2, 3, 0, 0, 0, 0},
 		{"indexed-4", 4, 3, 0, 0, 0, 0},
+		{"indexed-8", 8, 3, 0, 0, 0, 0},
+		{"gray-alpha-8", 8, 4, 0, 0, 0, 0},
 		{"gray-alpha-16", 16, 4, 0, 0, 0, 0},
 		{"rgba-8", 8, 6, 0, 0, 0, 0},
+		{"rgba-16", 16, 6, 0, 0, 0, 0},
 		{"depth-zero", 0, 2, 0, 0, 0, http.StatusBadRequest},
 		{"rgb-depth-1", 1, 2, 0, 0, 0, http.StatusBadRequest},
 		{"indexed-depth-16", 16, 3, 0, 0, 0, http.StatusBadRequest},
@@ -159,8 +169,12 @@ func TestRasterSourcePNGHeaderFields(t *testing.T) {
 			rasterTestStatus(t, buf, 16000000, tc.status)
 		})
 	}
+	rasterTestStatus(t, rasterTestPNG(0x7fffffff, 1), 0x7fffffff, 0)
+	rasterTestStatus(t, rasterTestPNG(1, 0x7fffffff), 0x7fffffff, 0)
 	rasterTestStatus(t, rasterTestPNG(0x80000000, 1), 16000000, http.StatusBadRequest)
 	rasterTestStatus(t, rasterTestPNG(1, 0x80000000), 16000000, http.StatusBadRequest)
+	rasterTestStatus(t, rasterTestPNG(0x80000000, 1), 1<<63-1, http.StatusBadRequest)
+	rasterTestStatus(t, rasterTestPNG(1, 0x80000000), 1<<63-1, http.StatusBadRequest)
 }
 
 func TestRasterSourceRealFiles(t *testing.T) {
@@ -247,10 +261,15 @@ func TestRasterSourceMalformedContainers(t *testing.T) {
 	}
 }
 
-type rasterFailingReader struct{}
+type rasterFailingReader struct {
+	err error
+}
 
-func (rasterFailingReader) Read([]byte) (int, error) {
-	return 0, errors.New("input read failed")
+func (r rasterFailingReader) Read([]byte) (int, error) {
+	if r.err != nil {
+		return 0, r.err
+	}
+	return 0, errors.New(strings.Repeat("input read failed", 1024))
 }
 
 func TestRasterSourceReadFailuresBypassPlaceholder(t *testing.T) {
@@ -284,6 +303,38 @@ func TestRasterSourceReadFailuresBypassPlaceholder(t *testing.T) {
 			imageController(o, op)(response, req)
 			if called != 0 || response.Code != http.StatusBadRequest || response.Header().Get("Content-Type") != "application/json" {
 				t.Fatalf("calls = %d, status = %d, type = %q, body = %s", called, response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+			if got, want := response.Body.String(), string(ErrEmptyBody.JSON()); got != want {
+				t.Fatalf("body = %q, want fixed error %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRasterSourceOversizeReadBypassesPlaceholder(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"max-bytes", &http.MaxBytesError{Limit: 1}},
+		{"typed-error", NewError(strings.Repeat("untrusted oversized input", 1024), http.StatusRequestEntityTooLarge)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := ServerOptions{EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: 299}
+			LoadSources(o)
+			op := Operation(func([]byte, ImageOptions) (Image, error) {
+				t.Fatal("operation must not run")
+				return Image{}, nil
+			})
+			req := httptest.NewRequest(http.MethodPost, "/resize?width=1&height=1", rasterFailingReader{err: tc.err})
+			req.Header.Set("Content-Type", "application/octet-stream")
+			response := httptest.NewRecorder()
+			imageController(o, op)(response, req)
+			if response.Code != http.StatusRequestEntityTooLarge || response.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("status = %d, type = %q, body = %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+			if got, want := response.Body.String(), string(ErrMaxBodySize.JSON()); got != want {
+				t.Fatalf("body = %q, want fixed error %q", got, want)
 			}
 		})
 	}
@@ -335,6 +386,8 @@ func TestRasterSourceInvalidParamsBypassPlaceholder(t *testing.T) {
 		{"direct-watermark", WatermarkImage, url.Values{"quality": {"not-a-number"}}},
 		{"pipeline-watermark", Pipeline, url.Values{"quality": {"not-a-number"}, "operations": {`[{"operation":"watermarkImage","ignore_failure":true}]`}}},
 		{"ordinary", Operation(func([]byte, ImageOptions) (Image, error) { t.Fatal("operation must not run"); return Image{}, nil }), url.Values{"quality": {"not-a-number"}}},
+		{"long-value", WatermarkImage, url.Values{"quality": {strings.Repeat("invalid", 1024)}}},
+		{"invalid-output-format", WatermarkImage, url.Values{"type": {"unsupported"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -342,6 +395,13 @@ func TestRasterSourceInvalidParamsBypassPlaceholder(t *testing.T) {
 			imageHandler(response, request, rasterTestPNG(1, 1), tc.op, ServerOptions{EnablePlaceholder: true, PlaceholderImage: []byte("not an image"), PlaceholderStatus: 299})
 			if response.Code != http.StatusBadRequest || response.Header().Get("Content-Type") != "application/json" {
 				t.Fatalf("status = %d, type = %q, body = %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+			want := NewError("Error while processing parameters", http.StatusBadRequest)
+			if tc.name == "invalid-output-format" {
+				want = ErrOutputFormat
+			}
+			if got := response.Body.String(); got != string(want.JSON()) {
+				t.Fatalf("body = %q, want fixed error %q", got, want.JSON())
 			}
 		})
 	}

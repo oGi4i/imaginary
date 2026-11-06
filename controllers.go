@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
@@ -37,22 +38,24 @@ func imageController(o ServerOptions, operation Operation) func(http.ResponseWri
 	return func(w http.ResponseWriter, req *http.Request) {
 		var imageSource = MatchSource(req)
 		if imageSource == nil {
-			ErrorReply(req, w, ErrMissingImageSource, o)
+			ErrorReply(req, w, ErrMissingImageSource, ServerOptions{})
 			return
 		}
 
 		buf, err := imageSource.GetImage(req)
 		if err != nil {
-			if xerr, ok := err.(Error); ok {
-				ErrorReply(req, w, xerr, o)
+			var maxBytesErr *http.MaxBytesError
+			var sourceErr Error
+			if errors.As(err, &maxBytesErr) || (errors.As(err, &sourceErr) && sourceErr.HTTPCode() == http.StatusRequestEntityTooLarge) {
+				ErrorReply(req, w, ErrMaxBodySize, ServerOptions{})
 			} else {
-				ErrorReply(req, w, NewError(err.Error(), http.StatusBadRequest), o)
+				ErrorReply(req, w, ErrEmptyBody, ServerOptions{})
 			}
 			return
 		}
 
 		if len(buf) == 0 {
-			ErrorReply(req, w, ErrEmptyBody, o)
+			ErrorReply(req, w, ErrEmptyBody, ServerOptions{})
 			return
 		}
 
@@ -85,7 +88,7 @@ func imageHandler(w http.ResponseWriter, r *http.Request, buf []byte, operation 
 
 	opts, err := buildParamsFromQuery(r.URL.Query())
 	if err != nil {
-		ErrorReply(r, w, NewError("Error while processing parameters, "+err.Error(), http.StatusBadRequest), o)
+		ErrorReply(r, w, NewError("Error while processing parameters", http.StatusBadRequest), ServerOptions{})
 		return
 	}
 
@@ -94,7 +97,7 @@ func imageHandler(w http.ResponseWriter, r *http.Request, buf []byte, operation 
 		opts.Type = determineAcceptMimeType(r.Header.Get("Accept"))
 		vary = "Accept" // Ensure caches behave correctly for negotiated content
 	} else if opts.Type != "" && ImageType(opts.Type) == 0 {
-		ErrorReply(r, w, ErrOutputFormat, o)
+		ErrorReply(r, w, ErrOutputFormat, ServerOptions{})
 		return
 	}
 
