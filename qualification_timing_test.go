@@ -28,12 +28,12 @@ func TestQualificationLifecycleSuccessAndTransfer(t *testing.T) {
 	gate := newImageGate(time.Second)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	h := qualificationTimingMiddleware(true, store, gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := qualificationTimingMiddleware(true, store, gate.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		qualificationTimingSourceDone(r)
 		qualificationTimingTransformStart(r)
 		qualificationTimingTransformDone(r)
 		_, _ = w.Write([]byte("image"))
-	})))
+	}), true))
 	w := &qualificationSlowWriter{header: make(http.Header), started: started, release: release}
 	done := make(chan struct{})
 	go func() {
@@ -85,7 +85,7 @@ func TestQualificationLifecycleCompletionBeforePromotion(t *testing.T) {
 	releaseFirst := make(chan struct{})
 	secondSaw := make(chan bool, 1)
 	var calls int
-	h := qualificationTimingMiddleware(true, store, gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := qualificationTimingMiddleware(true, store, gate.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
 			close(firstStarted)
@@ -94,7 +94,7 @@ func TestQualificationLifecycleCompletionBeforePromotion(t *testing.T) {
 		}
 		got := store.snapshot()
 		secondSaw <- len(got.Records) == 1 && got.Records[0].CleanupNS != nil
-	})))
+	}), true))
 	done := make(chan struct{}, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
@@ -128,12 +128,12 @@ func TestQualificationLifecycleStatuses(t *testing.T) {
 			store := newQualificationTimingStore()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tc.cancel {
 					cancel()
 				}
 				w.WriteHeader(tc.status)
-			})))
+			}), true))
 			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil).WithContext(ctx))
 			got := store.snapshot()
 			if len(got.Records) != 1 || got.Records[0].Status != tc.want {
@@ -145,7 +145,7 @@ func TestQualificationLifecycleStatuses(t *testing.T) {
 
 func TestQualificationLifecycleRetentionAndConcurrency(t *testing.T) {
 	store := newQualificationTimingStore()
-	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})))
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), true))
 	var wg sync.WaitGroup
 	for i := 0; i < 64; i++ {
 		wg.Add(1)
@@ -173,9 +173,9 @@ func TestQualificationLifecycleRetentionAndConcurrency(t *testing.T) {
 
 func TestQualificationLifecycleErrorMarker(t *testing.T) {
 	store := newQualificationTimingStore()
-	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		qualificationTimingError(r, errors.New("secret path"))
-	})))
+	}), true))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil))
 	got := store.snapshot()
 	if len(got.Records) != 1 || got.Records[0].Status != 3 {

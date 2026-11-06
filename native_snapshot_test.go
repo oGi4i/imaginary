@@ -15,14 +15,14 @@ func TestQualificationSnapshotReadOnly(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/snapshot", nil))
-		if w.Code != http.StatusOK || w.Body.Len() > 4096 {
+		if w.Code != http.StatusOK || w.Body.Len() > 32768 {
 			t.Fatalf("snapshot response %d (%d bytes)", w.Code, w.Body.Len())
 		}
 		var got qualificationSnapshot
 		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 			t.Fatal(err)
 		}
-		if got.SchemaVersion != 2 || got.ProcessLifetime == "" || got.Sequence == 0 {
+		if got.SchemaVersion != 3 || got.ProcessLifetime == "" || got.Sequence == 0 {
 			t.Fatalf("invalid identity: %+v", got)
 		}
 		if i == 1 && (first.ProcessLifetime != got.ProcessLifetime || got.Sequence <= first.Sequence) {

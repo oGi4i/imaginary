@@ -29,7 +29,12 @@ Its native getters provide read-only cache assertions for tests; there is no
 preload library or control-file interface. The default-off qualification
 snapshot listener is read-only, loopback-only and separate from the application
 port. Cgroup identity is not yet established, so its counters are unavailable;
-the listener is not qualification evidence. See `docs/qualification-observation.md`.
+the listener is not qualification evidence. Its bounded lifecycle records exist
+only when enabled. See `docs/qualification-observation.md`.
+
+The strict JSON-compatible YAML runtime lock and source-lock CLI validate
+structure and report unresolved inputs. They do not authenticate the lock or
+build an image. See `docs/candidate-image.md`.
 
 ## Verification and limits
 

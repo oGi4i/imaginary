@@ -38,12 +38,18 @@ func imageController(o ServerOptions, operation Operation) func(http.ResponseWri
 	return func(w http.ResponseWriter, req *http.Request) {
 		var imageSource = MatchSource(req)
 		if imageSource == nil {
+			if o.QualSnapshot {
+				qualificationTimingSourceDone(req)
+			}
 			ErrorReply(req, w, ErrMissingImageSource, ServerOptions{})
 			return
 		}
 
 		buf, err := imageSource.GetImage(req)
 		if err != nil {
+			if o.QualSnapshot {
+				qualificationTimingSourceDone(req)
+			}
 			var maxBytesErr *http.MaxBytesError
 			var sourceErr Error
 			if errors.As(err, &maxBytesErr) || (errors.As(err, &sourceErr) && sourceErr.HTTPCode() == http.StatusRequestEntityTooLarge) {
@@ -55,6 +61,9 @@ func imageController(o ServerOptions, operation Operation) func(http.ResponseWri
 		}
 
 		if len(buf) == 0 {
+			if o.QualSnapshot {
+				qualificationTimingSourceDone(req)
+			}
 			ErrorReply(req, w, ErrEmptyBody, ServerOptions{})
 			return
 		}
@@ -82,12 +91,18 @@ func determineAcceptMimeType(accept string) string {
 func imageHandler(w http.ResponseWriter, r *http.Request, buf []byte, operation Operation, o ServerOptions) {
 	if err := validateRasterSource(buf, o.MaxSourcePixels); err != nil {
 		// Do not invoke the native placeholder for rejected source data.
+		if o.QualSnapshot {
+			qualificationTimingSourceDone(r)
+		}
 		ErrorReply(r, w, err.(Error), ServerOptions{})
 		return
 	}
 
 	opts, err := buildParamsFromQuery(r.URL.Query())
 	if err != nil {
+		if o.QualSnapshot {
+			qualificationTimingSourceDone(r)
+		}
 		ErrorReply(r, w, NewError("Error while processing parameters", http.StatusBadRequest), ServerOptions{})
 		return
 	}
@@ -97,15 +112,28 @@ func imageHandler(w http.ResponseWriter, r *http.Request, buf []byte, operation 
 		opts.Type = determineAcceptMimeType(r.Header.Get("Accept"))
 		vary = "Accept" // Ensure caches behave correctly for negotiated content
 	} else if opts.Type != "" && ImageType(opts.Type) == 0 {
+		if o.QualSnapshot {
+			qualificationTimingSourceDone(r)
+		}
 		ErrorReply(r, w, ErrOutputFormat, ServerOptions{})
 		return
 	}
 
+	if o.QualSnapshot {
+		qualificationTimingSourceDone(r)
+		qualificationTimingTransformStart(r)
+	}
 	image, err := operation.Run(buf, opts)
+	if o.QualSnapshot {
+		qualificationTimingTransformDone(r)
+	}
 	if err != nil {
 		if err == errExcludedWatermark || err == errInvalidPipelineParams {
 			ErrorReply(r, w, err.(Error), ServerOptions{})
 			return
+		}
+		if o.QualSnapshot {
+			qualificationTimingError(r, err)
 		}
 		ErrorReply(r, w, NewError("Error while processing the image: "+err.Error(), http.StatusBadRequest), o)
 		return

@@ -40,8 +40,10 @@ func Middleware(fn func(http.ResponseWriter, *http.Request), o ServerOptions) ht
 func ImageMiddleware(o ServerOptions) func(Operation) http.Handler {
 	gate := newImageGate(30 * time.Second)
 	return func(fn Operation) http.Handler {
-		handler := gate.Wrap(limitImageBody(validateImage(Middleware(imageController(o, fn), o), o), o))
-
+		handler := gate.wrap(limitImageBody(validateImage(Middleware(imageController(o, fn), o), o), o), o.QualSnapshot)
+		if o.QualSnapshot {
+			handler = qualificationTimingMiddleware(true, qualificationTimings, handler)
+		}
 		if o.EnableURLSignature {
 			return validateURLSignature(handler, o)
 		}

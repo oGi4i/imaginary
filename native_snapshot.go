@@ -35,23 +35,24 @@ func newQualificationLifetime() string {
 }
 
 type qualificationSnapshot struct {
-	SchemaVersion            int     `json:"schema_version"`
-	BuildIdentity            string  `json:"build_identity"`
-	ProcessLifetime          string  `json:"process_lifetime"`
-	Sequence                 uint64  `json:"sequence"`
-	GoHeapAllocBytes         uint64  `json:"go_heap_alloc_bytes"`
-	VipsTrackedBytes         int64   `json:"vips_tracked_bytes"`
-	VipsTrackedAllocations   int64   `json:"vips_tracked_allocations"`
-	VipsCacheOperations      int     `json:"vips_cache_operations"`
-	VipsCacheLimitOperations int     `json:"vips_cache_limit_operations"`
-	ProcessRSSBytes          *uint64 `json:"process_rss_bytes"`
-	ProcessLazyFreeBytes     *uint64 `json:"process_lazyfree_bytes"`
-	ProcessStatus            string  `json:"process_status"`
-	CgroupStatus             string  `json:"cgroup_status"`
-	CgroupCurrentBytes       *uint64 `json:"cgroup_current_bytes"`
-	CgroupPeakBytes          *uint64 `json:"cgroup_peak_bytes"`
-	CgroupAnonBytes          *uint64 `json:"cgroup_anon_bytes"`
-	CgroupFileBytes          *uint64 `json:"cgroup_file_bytes"`
+	SchemaVersion            int                         `json:"schema_version"`
+	BuildIdentity            string                      `json:"build_identity"`
+	ProcessLifetime          string                      `json:"process_lifetime"`
+	Sequence                 uint64                      `json:"sequence"`
+	GoHeapAllocBytes         uint64                      `json:"go_heap_alloc_bytes"`
+	VipsTrackedBytes         int64                       `json:"vips_tracked_bytes"`
+	VipsTrackedAllocations   int64                       `json:"vips_tracked_allocations"`
+	VipsCacheOperations      int                         `json:"vips_cache_operations"`
+	VipsCacheLimitOperations int                         `json:"vips_cache_limit_operations"`
+	ProcessRSSBytes          *uint64                     `json:"process_rss_bytes"`
+	ProcessLazyFreeBytes     *uint64                     `json:"process_lazyfree_bytes"`
+	ProcessStatus            string                      `json:"process_status"`
+	CgroupStatus             string                      `json:"cgroup_status"`
+	CgroupCurrentBytes       *uint64                     `json:"cgroup_current_bytes"`
+	CgroupPeakBytes          *uint64                     `json:"cgroup_peak_bytes"`
+	CgroupAnonBytes          *uint64                     `json:"cgroup_anon_bytes"`
+	CgroupFileBytes          *uint64                     `json:"cgroup_file_bytes"`
+	Lifecycle                qualificationTimingSnapshot `json:"lifecycle"`
 }
 
 func newQualificationHandler() http.Handler {
@@ -99,13 +100,14 @@ func qualificationHandler(processMemory func() (*uint64, *uint64, string)) http.
 		runtime.ReadMemStats(&mem)
 		native := bimg.VipsMemory()
 		snapshot := qualificationSnapshot{
-			SchemaVersion: 2, BuildIdentity: Version, ProcessLifetime: qualificationLifetime,
+			SchemaVersion: 3, BuildIdentity: Version, ProcessLifetime: qualificationLifetime,
 			Sequence: atomic.AddUint64(&qualificationSequence, 1), GoHeapAllocBytes: mem.HeapAlloc,
 			VipsTrackedBytes: native.Memory, VipsTrackedAllocations: native.Allocations,
 			VipsCacheOperations: nativeOperationCacheSize(), VipsCacheLimitOperations: nativeOperationCacheLimit(),
 			ProcessStatus: "unavailable", CgroupStatus: "identity_unproven",
 		}
 		snapshot.ProcessRSSBytes, snapshot.ProcessLazyFreeBytes, snapshot.ProcessStatus = processMemory()
+		snapshot.Lifecycle = qualificationTimings.snapshot()
 		_ = json.NewEncoder(w).Encode(snapshot)
 	})
 }
