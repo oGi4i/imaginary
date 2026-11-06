@@ -193,7 +193,7 @@ func TestQualificationLifecycleQueueTimeoutIsRejection(t *testing.T) {
 	got := store.snapshot()
 	close(release)
 	<-done
-	if w.Code != http.StatusServiceUnavailable || len(got.Records) != 1 || got.Records[0].Status != 2 || got.Records[0].CleanupNS != nil {
+	if w.Code != http.StatusServiceUnavailable || len(got.Records) != 1 || got.Records[0].Status != 2 || got.Records[0].CleanupNS != nil || got.Records[0].QueueNS == nil {
 		t.Fatalf("queue timeout must be rejection without cleanup: status=%d records=%+v", w.Code, got.Records)
 	}
 }
@@ -340,7 +340,7 @@ func TestQualificationLifecycleURLSignatureRejection(t *testing.T) {
 		t.Fatalf("missing signature rejection record: status=%d snapshot=%+v", w.Code, got)
 	}
 	record := got.Records[len(got.Records)-1]
-	if record.Status != 2 || record.CleanupNS != nil {
+	if record.Status != 2 || record.CleanupNS != nil || record.QueueNS != nil {
 		t.Fatalf("invalid signature outcome: %+v", record)
 	}
 }
