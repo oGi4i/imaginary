@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const formFieldName = "file"
@@ -43,7 +44,15 @@ func isFormBody(r *http.Request) bool {
 func readFormBody(r *http.Request, limit int64) ([]byte, error) {
 	defer func() {
 		if r.MultipartForm != nil {
+			timing := qualificationTimingFrom(r)
+			var started time.Time
+			if timing != nil {
+				started = time.Now()
+			}
 			_ = r.MultipartForm.RemoveAll()
+			if timing != nil {
+				qualificationTimingCleanup(timing, started)
+			}
 		}
 	}()
 	memory := maxMemory

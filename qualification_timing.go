@@ -77,13 +77,15 @@ func (s *qualificationTimingStore) snapshot() qualificationTimingSnapshot {
 type qualificationTimingKey struct{}
 
 type qualificationTiming struct {
-	store          *qualificationTimingStore
-	record         qualificationTimingRecord
-	entered        time.Time
-	admitted       time.Time
-	transformStart time.Time
-	status         int
-	published      bool
+	store             *qualificationTimingStore
+	record            qualificationTimingRecord
+	entered           time.Time
+	admitted          time.Time
+	transformStart    time.Time
+	transformSegments int
+	status            int
+	abnormal          bool
+	published         bool
 }
 
 func qualificationTimingFrom(r *http.Request) *qualificationTiming {
@@ -98,7 +100,11 @@ func qualificationDuration(start time.Time) *int64 {
 
 func qualificationTimingSourceDone(r *http.Request) {
 	if t := qualificationTimingFrom(r); t != nil && !t.admitted.IsZero() {
-		t.record.SourcePreflightNS = qualificationDuration(t.admitted)
+		duration := time.Since(t.admitted).Nanoseconds()
+		if t.record.CleanupNS != nil {
+			duration -= *t.record.CleanupNS
+		}
+		t.record.SourcePreflightNS = &duration
 	}
 }
 
@@ -110,8 +116,22 @@ func qualificationTimingTransformStart(r *http.Request) {
 
 func qualificationTimingTransformDone(r *http.Request) {
 	if t := qualificationTimingFrom(r); t != nil && !t.transformStart.IsZero() {
-		t.record.TransformOutputNS = qualificationDuration(t.transformStart)
+		duration := time.Since(t.transformStart).Nanoseconds()
+		if t.record.TransformOutputNS != nil {
+			duration += *t.record.TransformOutputNS
+		}
+		t.record.TransformOutputNS = &duration
+		t.transformStart = time.Time{}
+		t.transformSegments++
 	}
+}
+
+func qualificationTimingCleanup(t *qualificationTiming, start time.Time) {
+	duration := time.Since(start).Nanoseconds()
+	if t.record.CleanupNS != nil {
+		duration += *t.record.CleanupNS
+	}
+	t.record.CleanupNS = &duration
 }
 
 func qualificationTimingError(r *http.Request, _ error) {
@@ -124,7 +144,7 @@ func (t *qualificationTiming) finish(r *http.Request) {
 	if t.published {
 		return
 	}
-	if r.Context().Err() != nil {
+	if r.Context().Err() != nil && !t.abnormal {
 		t.status = 4
 	}
 	if t.status == 0 {
@@ -145,7 +165,7 @@ type qualificationTimingWriter struct {
 }
 
 func (w *qualificationTimingWriter) WriteHeader(code int) {
-	if w.timing.status != 3 {
+	if w.timing.status != 3 && w.timing.status != 2 {
 		if code >= 500 {
 			w.timing.status = 3
 		} else if code >= 400 {

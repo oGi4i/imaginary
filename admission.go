@@ -78,6 +78,11 @@ func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 		} else {
 			if g.waiter != nil {
 				g.mu.Unlock()
+				if observed {
+					if t := qualificationTimingFrom(r); t != nil {
+						t.status = 2
+					}
+				}
 				imageUnavailable(w)
 				return
 			}
@@ -106,6 +111,11 @@ func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 			g.mu.Unlock()
 			if cancelled || timedOut {
 				if timedOut && !cancelled {
+					if observed {
+						if t := qualificationTimingFrom(r); t != nil {
+							t.status = 2
+						}
+					}
 					imageUnavailable(w)
 				}
 				if promoted {
@@ -129,8 +139,13 @@ func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 				timing.record.QueueNS = qualificationDuration(timing.entered)
 			}
 		}
+		returned := false
 		defer func() {
 			defer g.release()
+			if timing != nil && !returned {
+				timing.status = 3
+				timing.abnormal = true
+			}
 			var cleanup time.Time
 			if timing != nil {
 				cleanup = time.Now()
@@ -139,13 +154,15 @@ func (g *imageGate) wrap(next http.Handler, observed bool) http.Handler {
 				_ = r.MultipartForm.RemoveAll()
 			}
 			if timing != nil {
-				timing.record.CleanupNS = qualificationDuration(cleanup)
+				qualificationTimingCleanup(timing, cleanup)
 				timing.finish(r)
 			}
 		}()
 		if r.Context().Err() != nil {
+			returned = true
 			return
 		}
 		next.ServeHTTP(imageResponseWriter{ResponseWriter: w, ctx: r.Context()}, r)
+		returned = true
 	})
 }

@@ -80,7 +80,13 @@ func replyWithPlaceholder(req *http.Request, w http.ResponseWriter, errCaller Er
 	}
 
 	// Resize placeholder to expected output
+	if o.QualSnapshot {
+		qualificationTimingTransformStart(req)
+	}
 	buf, err := bimg.Resize(o.PlaceholderImage, bimgOptions)
+	if o.QualSnapshot {
+		qualificationTimingTransformDone(req)
+	}
 	if err != nil {
 		sendErrorResponse(w, http.StatusBadRequest, err)
 		return err
