@@ -75,28 +75,34 @@ jobs:
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=TERM --kill-after=15s 60s go test -v -count=1 -timeout=50s -run '^TestBodyLimitRawPOSTBoundaries$' ./...
+        run: timeout --signal=KILL 60s go test -v -count=1 -timeout=50s -run '^TestBodyLimitRawPOSTBoundaries$' ./...
+      - name: Focused source regressions
+        if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
+        env:
+          CGO_ENABLED: '1'
+          GOFLAGS: -mod=readonly
+        run: timeout --signal=KILL 60s go test -v -count=1 -timeout=50s -run '^TestRasterSource(PNGHeaderFields|ReadFailuresBypassPlaceholder|OversizeReadBypassesPlaceholder|RejectsWatermarkImageBeforeFetch|InvalidParamsBypassPlaceholder)$' ./...
       - name: Unit and integration tests
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=TERM --kill-after=15s 5m go test -v -count=1 -timeout=4m ./...
+        run: timeout --signal=KILL 5m go test -v -count=1 -timeout=4m ./...
       - name: Race tests
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=TERM --kill-after=15s 5m go test -v -race -count=1 -timeout=4m ./...
+        run: timeout --signal=KILL 5m go test -v -race -count=1 -timeout=4m ./...
       - name: Vet
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=TERM --kill-after=15s 120s go vet ./...
+        run: timeout --signal=KILL 120s go vet ./...
       - name: Build binary
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=TERM --kill-after=15s 120s go build -o "$RUNNER_TEMP/imaginary" .
+        run: timeout --signal=KILL 120s go build -o "$RUNNER_TEMP/imaginary" .
