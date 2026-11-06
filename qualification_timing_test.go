@@ -300,6 +300,28 @@ func TestQualificationLifecycleNativePlaceholderIsTimed(t *testing.T) {
 	}
 }
 
+func TestQualificationLifecycleAuthPlaceholderIsRejection(t *testing.T) {
+	placeholder, err := ioutil.ReadFile("testdata/large.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newQualificationTimingStore()
+	o := ServerOptions{QualSnapshot: true, APIKey: "required", EnablePlaceholder: true, PlaceholderImage: placeholder, PlaceholderStatus: http.StatusOK}
+	auth := authorizeClient(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("unauthorized request reached handler")
+	}), o)
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(auth, true))
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/resize?width=64&height=64", nil))
+	got := store.snapshot()
+	if response.Code != http.StatusOK || response.Body.Len() == 0 {
+		t.Fatalf("placeholder response changed: status=%d body=%d", response.Code, response.Body.Len())
+	}
+	if len(got.Records) != 1 || got.Records[0].Status != 2 || got.Records[0].TransformOutputNS == nil || *got.Records[0].TransformOutputNS <= 0 {
+		t.Fatalf("auth rejection recorded incorrectly: %+v", got)
+	}
+}
+
 func TestQualificationLifecycleErrorMarker(t *testing.T) {
 	store := newQualificationTimingStore()
 	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
