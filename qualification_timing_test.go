@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -168,6 +170,103 @@ func TestQualificationLifecycleRetentionAndConcurrency(t *testing.T) {
 	encoded, err := json.Marshal(got)
 	if err != nil || len(encoded) > 32768 {
 		t.Fatalf("unbounded timing payload: %d, %v", len(encoded), err)
+	}
+}
+
+func TestQualificationLifecycleQueueTimeoutIsRejection(t *testing.T) {
+	store := newQualificationTimingStore()
+	gate := newImageGate(20 * time.Millisecond)
+	started, release := make(chan struct{}), make(chan struct{})
+	h := qualificationTimingMiddleware(true, store, gate.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+	}), true))
+	done := make(chan struct{})
+	go func() {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil))
+		close(done)
+	}()
+	<-started
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/resize", nil))
+	got := store.snapshot()
+	close(release)
+	<-done
+	if w.Code != http.StatusServiceUnavailable || len(got.Records) != 1 || got.Records[0].Status != 2 || got.Records[0].CleanupNS != nil {
+		t.Fatalf("queue timeout must be rejection without cleanup: status=%d records=%+v", w.Code, got.Records)
+	}
+}
+
+func TestQualificationLifecyclePanicIsError(t *testing.T) {
+	store := newQualificationTimingStore()
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("private")
+	}), true))
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("panic did not propagate")
+			}
+		}()
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil))
+	}()
+	got := store.snapshot()
+	if len(got.Records) != 1 || got.Records[0].Status != 3 || got.Records[0].CleanupNS == nil {
+		t.Fatalf("panic must publish error after cleanup: %+v", got)
+	}
+}
+
+func TestQualificationLifecycleMultipartCleanupAccounting(t *testing.T) {
+	store := newQualificationTimingStore()
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		part, err := mw.CreateFormFile("file", "image.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = part.Write([]byte("small"))
+		_ = mw.Close()
+		r.Body = io.NopCloser(bytes.NewReader(body.Bytes()))
+		r.Header.Set("Content-Type", mw.FormDataContentType())
+		if err := r.ParseMultipartForm(0); err != nil {
+			t.Fatal(err)
+		}
+		before := time.Now()
+		if _, err := readFormBody(r, 4096); err != nil {
+			t.Fatal(err)
+		}
+		after := time.Now()
+		qualificationTimingSourceDone(r)
+		qualificationTimingTransformStart(r)
+		qualificationTimingTransformDone(r)
+		timing := qualificationTimingFrom(r)
+		if timing.record.CleanupNS == nil || *timing.record.CleanupNS <= 0 || *timing.record.CleanupNS > after.Sub(before).Nanoseconds() {
+			t.Error("actual source cleanup was not measured")
+		}
+	}), true))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil))
+	got := store.snapshot()
+	if len(got.Records) != 1 || got.Records[0].CleanupNS == nil || got.Records[0].SourcePreflightNS == nil || *got.Records[0].CleanupNS <= 0 {
+		t.Fatalf("multipart cleanup must be timed: %+v", got)
+	}
+}
+
+func TestQualificationLifecycleTransformSegmentsAccumulate(t *testing.T) {
+	store := newQualificationTimingStore()
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		qualificationTimingSourceDone(r)
+		qualificationTimingTransformStart(r)
+		time.Sleep(10 * time.Millisecond)
+		qualificationTimingTransformDone(r)
+		qualificationTimingTransformStart(r)
+		time.Sleep(10 * time.Millisecond)
+		qualificationTimingTransformDone(r)
+	}), true))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil))
+	got := store.snapshot()
+	if len(got.Records) != 1 || got.Records[0].TransformOutputNS == nil || *got.Records[0].TransformOutputNS < int64(18*time.Millisecond) {
+		t.Fatalf("transform segments must accumulate: %+v", got)
 	}
 }
 
