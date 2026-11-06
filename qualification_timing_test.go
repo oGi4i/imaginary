@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -20,7 +21,11 @@ func TestQualificationLifecycleDisabled(t *testing.T) {
 	h := qualificationTimingMiddleware(false, store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/resize", nil))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/resize", nil))
+	if w.Header().Get("X-Imaginary-Request-Sequence") != "" {
+		t.Fatal("disabled timing exposed a request sequence")
+	}
 	if got := store.snapshot(); got.RequestSequence != 0 || len(got.Records) != 0 {
 		t.Fatalf("disabled timing recorded work: %+v", got)
 	}
@@ -58,6 +63,9 @@ func TestQualificationLifecycleSuccessAndTransfer(t *testing.T) {
 		t.Fatalf("records: %+v", got)
 	}
 	record := got.Records[0]
+	if w.Header().Get("X-Imaginary-Request-Sequence") != strconv.FormatUint(record.RequestSequence, 10) {
+		t.Fatal("success response sequence does not match its lifecycle record")
+	}
 	if record.Status != 1 || record.SourcePreflightNS == nil || record.TransformOutputNS == nil || record.ResponseNS == nil || record.CleanupNS == nil || record.ProcessingNS == nil || *record.ProcessingNS != *record.TransformOutputNS+*record.CleanupNS {
 		t.Fatalf("invalid success record: %+v", record)
 	}
@@ -195,6 +203,9 @@ func TestQualificationLifecycleQueueTimeoutIsRejection(t *testing.T) {
 	<-done
 	if w.Code != http.StatusServiceUnavailable || len(got.Records) != 1 || got.Records[0].Status != 2 || got.Records[0].CleanupNS != nil || got.Records[0].QueueNS == nil {
 		t.Fatalf("queue timeout must be rejection without cleanup: status=%d records=%+v", w.Code, got.Records)
+	}
+	if w.Header().Get("X-Imaginary-Request-Sequence") != strconv.FormatUint(got.Records[0].RequestSequence, 10) {
+		t.Fatal("queue rejection sequence does not match its lifecycle record")
 	}
 }
 
@@ -340,6 +351,9 @@ func TestQualificationLifecycleURLSignatureRejection(t *testing.T) {
 		t.Fatalf("missing signature rejection record: status=%d snapshot=%+v", w.Code, got)
 	}
 	record := got.Records[len(got.Records)-1]
+	if w.Header().Get("X-Imaginary-Request-Sequence") != strconv.FormatUint(record.RequestSequence, 10) {
+		t.Fatal("signature rejection sequence does not match its lifecycle record")
+	}
 	if record.Status != 2 || record.CleanupNS != nil || record.QueueNS != nil {
 		t.Fatalf("invalid signature outcome: %+v", record)
 	}
