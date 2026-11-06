@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -267,6 +268,35 @@ func TestQualificationLifecycleTransformSegmentsAccumulate(t *testing.T) {
 	got := store.snapshot()
 	if len(got.Records) != 1 || got.Records[0].TransformOutputNS == nil || *got.Records[0].TransformOutputNS < int64(18*time.Millisecond) {
 		t.Fatalf("transform segments must accumulate: %+v", got)
+	}
+}
+
+func TestQualificationLifecycleNativePlaceholderIsTimed(t *testing.T) {
+	placeholder, err := ioutil.ReadFile("testdata/large.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newQualificationTimingStore()
+	var originalTransform int64
+	var segments int
+	o := ServerOptions{QualSnapshot: true, EnablePlaceholder: true, PlaceholderImage: placeholder, PlaceholderStatus: http.StatusTeapot}
+	operation := Operation(func([]byte, ImageOptions) (Image, error) {
+		return Image{}, errors.New("private")
+	})
+	h := qualificationTimingMiddleware(true, store, newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		imageHandler(w, r, rasterTestPNG(1, 1), operation, o)
+		timing := qualificationTimingFrom(r)
+		originalTransform = *timing.record.TransformOutputNS
+		segments = timing.transformSegments
+	}), true))
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/resize?width=64&height=64", nil))
+	got := store.snapshot()
+	if response.Code != http.StatusTeapot || response.Body.Len() == 0 || len(got.Records) != 1 || got.Records[0].Status != 3 {
+		t.Fatalf("native placeholder response changed: status=%d records=%+v", response.Code, got.Records)
+	}
+	if segments != 2 || got.Records[0].TransformOutputNS == nil || *got.Records[0].TransformOutputNS != originalTransform || originalTransform <= 0 {
+		t.Fatalf("invalid native timing: %+v", got.Records[0])
 	}
 }
 
