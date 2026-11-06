@@ -45,13 +45,17 @@ completed records are retained in completion order. Each has numeric
 `request_sequence`, `completion_sequence`, `status` (1 success, 2 rejected,
 3 error, 4 cancelled), and nanosecond durations `queue_ns`,
 `source_preflight_ns`, `transform_output_ns`, `response_ns`, `cleanup_ns`,
-`processing_ns`. Unobserved stages are null. Processing equals transform/output
-plus cleanup when both exist; it excludes response transfer. Publication follows
+`processing_ns`. Unobserved stages are null. Transform/output sums operation and
+native placeholder segments. Cleanup sums multipart source and gate cleanup;
+source/preflight excludes source cleanup. Processing equals transform/output plus
+cleanup when both exist; it excludes response transfer. Publication follows
 cleanup and precedes gate promotion. Request sequence is assigned at gate entry,
 and completion order can differ. `overwrite_total` counts ring turnover, not
 lost collector data. A collector detects lost unread records with its completion
 cursor and the oldest retained completion sequence, not request sequence gaps.
 The JSON snapshot is limited to 32 KiB and carries an exact `Content-Length`.
+Timers and records are opt-in. When disabled, multipart cleanup still performs a
+context lookup but no timing allocation. Overhead remains unmeasured.
 
 Trusted container identity, collector integration, qualification and
 observation-overhead measurement are not implemented here.
