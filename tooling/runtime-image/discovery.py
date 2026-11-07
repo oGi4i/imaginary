@@ -258,6 +258,19 @@ def check_release(fields, name):
 
 
 def snapshot_metadata(keyring):
+    with keyring.open('rb') as stream:
+        keyring_data = stream.read(8 * 1024 * 1024 + 1)
+    if len(keyring_data) > 8 * 1024 * 1024:
+        raise ValueError('keyring exceeds size limit')
+    with tempfile.TemporaryDirectory(prefix='runtime-keyring-') as tmp:
+        with tempfile.NamedTemporaryFile(dir=tmp) as frozen:
+            frozen.write(keyring_data)
+            frozen.flush()
+            return _snapshot_metadata(Path(frozen.name), keyring_data)
+
+
+def _snapshot_metadata(keyring, keyring_data):
+    keyring_hash = hashlib.sha256(keyring_data).hexdigest()
     results = {}
     for name, dist, archive in [('main', 'buster', 'debian'), ('security', 'buster/updates', 'debian-security')]:
         root = 'https://snapshot.debian.org/archive/' + archive + '/20240408T000000Z/'
@@ -276,7 +289,8 @@ def snapshot_metadata(keyring):
         results[name] = {'inrelease_url': root + 'dists/' + dist + '/InRelease',
                          'inrelease_sha256': hashlib.sha256(inrelease).hexdigest(),
                          'signer_primary_fingerprint': SIGNERS[name],
-                         'keyring_sha256': hashlib.sha256(keyring.read_bytes()).hexdigest(),
+                         'keyring_sha256': keyring_hash,
+                         'keyring_size': len(keyring_data),
                          'release_fields': {key: fields.get(key) for key in
                                             ('Origin', 'Label', 'Codename', 'Suite', 'Date', 'Valid-Until')},
                          'packages_url': root + 'dists/' + dist + '/' + index_path,

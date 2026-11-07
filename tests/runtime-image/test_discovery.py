@@ -53,6 +53,46 @@ class DiscoveryTest(unittest.TestCase):
                 d.verify_go_payload(record)
         self.assertNotIn('payload_verified', record)
 
+    def test_snapshot_records_bounded_keyring_identity(self):
+        release = 'Origin: Debian\n'
+        index = b'index'
+        with tempfile.TemporaryDirectory() as tmp:
+            keyring = Path(tmp) / 'keyring'
+            keyring.write_bytes(b'keys')
+            with mock.patch.object(d, 'fetch', return_value=index), \
+                 mock.patch.object(d, 'verify_digest'), \
+                 mock.patch.object(d, 'verify_inrelease', return_value=release), \
+                 mock.patch.object(d, 'check_release'), mock.patch.object(d, 'verify_index'):
+                result = d.snapshot_metadata(keyring)
+            for item in result.values():
+                self.assertEqual(item['keyring_size'], 4)
+                self.assertEqual(item['keyring_sha256'], hashlib.sha256(b'keys').hexdigest())
+            keyring.write_bytes(b'x' * (8 * 1024 * 1024 + 1))
+            with mock.patch.object(d, 'fetch') as fetch:
+                with self.assertRaises(ValueError):
+                    d.snapshot_metadata(keyring)
+                fetch.assert_not_called()
+
+    def test_snapshot_verifies_with_frozen_keyring_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original = Path(tmp) / 'keyring'
+            original.write_bytes(b'original')
+            seen = []
+            def fetch(*args, **kwargs):
+                original.write_bytes(b'changed')
+                return b'index'
+            def verify(data, path, signer):
+                seen.append((path != original, path.read_bytes(), path.stat().st_mode & 0o777))
+                return 'Origin: Debian\n'
+            with mock.patch.object(d, 'fetch', side_effect=fetch), \
+                 mock.patch.object(d, 'verify_digest'), mock.patch.object(d, 'verify_inrelease', side_effect=verify), \
+                 mock.patch.object(d, 'check_release'), mock.patch.object(d, 'verify_index'):
+                result = d.snapshot_metadata(original)
+            self.assertEqual(seen, [(True, b'original', 0o600)] * 2)
+            for entry in result.values():
+                self.assertEqual(entry['keyring_sha256'], hashlib.sha256(b'original').hexdigest())
+                self.assertEqual(entry['keyring_size'], len(b'original'))
+
     def test_platform_manifest_checks_config_and_digest(self):
         config = json.dumps({'architecture': 'amd64', 'os': 'linux'}).encode()
         manifest = json.dumps({'schemaVersion': 2, 'config': {

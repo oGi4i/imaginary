@@ -33,7 +33,9 @@ The artifact `runtime-input-metadata` contains `discovery.json` with `platform`,
 `base`, `go`, `snapshot`, null `build_packages`, null `runtime_packages`, null
 `reference_inventory`, and `limitations`. The snapshot entries include the
 InRelease and Packages URLs and SHA-256 hashes, the compressed Packages size,
-signer fingerprints and the freshness exception. Another helper can refetch a
+signer fingerprints, keyring SHA-256 and byte size, and the freshness exception.
+The keyring read is capped at 8 MiB. Both signatures use a private temporary
+copy of those exact bytes. Another helper can refetch a
 Packages index and verify its hash and size against this authenticated result. The artifact expires after seven days; it is uploaded
 only if the verification step writes the JSON. The Go entry records
 `payload_url` and `payload_verified` after both checks pass. A successful
