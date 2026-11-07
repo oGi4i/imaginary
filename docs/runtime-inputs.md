@@ -50,6 +50,11 @@ including base-installed packages. If it succeeds, the separate
 days. If the helper fails, the workflow cannot upload closure evidence that
 was not written. A reviewed CI run is required to establish whether resolution
 actually succeeds; code or mocked tests alone do not establish a closure.
+For failed offline APT configuration, CI may retain at most eight sanitized
+`E:`/`W:` lines, each capped at 160 characters. URLs, paths, controls and
+credential-like values are redacted before publication. The bounded log stays
+inside the disposable container; signature checks, APT sandboxing and container
+privileges remain unchanged.
 
 The separate reference job inventories the public reference image. Reference
 features and candidate images remain unqualified, and the discovery job ends

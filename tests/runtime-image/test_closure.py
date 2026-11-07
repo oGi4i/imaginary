@@ -190,6 +190,29 @@ class ClosureTest(unittest.TestCase):
             with self.assertRaises(c.ClosureError):
                 c.authenticated_indexes({'snapshot': {}}, Path(directory) / 'key')
 
+    def test_approved_apt_lines_are_bounded_and_sanitized(self):
+        raw = (b'E: Failed to fetch https://example.test/private?token=secret /tmp/private '
+               b'Bearer abcdefghijklmnopqrstuvwxyz123456 token=hidden\x1b[31m\n'
+               b'W: Cannot execute helper\n' + b'E: ' + b'x' * 500 + b'\n') * 12
+        lines = c.sanitize_apt_lines(raw)
+        self.assertEqual(len(lines), 8)
+        self.assertTrue(all(len(line) <= 160 and line.isascii() for line in lines))
+        for private in ('example.test', '/tmp/private', 'secret', 'abcdefghijklmnopqrstuvwxyz', 'hidden', '\x1b'):
+            self.assertNotIn(private, repr(lines))
+        self.assertIn('Cannot execute helper', repr(lines))
+        for payload in (b'E: token: abc123\n', b'E: password = hunter2\n',
+                        b'E: token="abc 123"\n', b'E: Failed to fetch mirror/private/pkg.deb\n'):
+            sanitized = repr(c.sanitize_apt_lines(payload))
+            for private in ('abc123', 'hunter2', 'abc 123', 'mirror/private/pkg.deb'):
+                self.assertNotIn(private, sanitized)
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('configure', 'build'):
+                c.configure_result(b'APT_RESULT=unknown\nE: Cannot execute helper /private/path\n')
+        message = c.diagnostic_message(caught.exception)
+        self.assertIn('Cannot execute helper', message)
+        self.assertNotIn('/private/path', message)
+        self.assertNotIn('apt_errors', c.diagnostic_message(c.DiagnosticError('solver', 'build', 'other')))
+
     def test_apt_configure_diagnostics_allow_only_fixed_markers(self):
         self.assertIsNone(c.configure_result(b'APT_RESULT=ok\n'))
         for reason in c.APT_REASONS:

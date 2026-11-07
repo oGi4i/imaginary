@@ -47,12 +47,33 @@ APT_REASONS = frozenset(('missing_key', 'invalid_signature', 'missing_release', 
                          'compression', 'permission', 'unsupported_method', 'unknown'))
 
 
+def sanitize_apt_lines(data):
+    """Retain only the explicitly approved, bounded public-build error lines."""
+    result = []
+    for line in data[:1024 * 1024].decode('ascii', errors='replace').splitlines():
+        if not line.startswith(('E:', 'W:')):
+            continue
+        line = re.sub(r'[^\x20-\x7e]', '?', line)
+        line = re.sub(r'\b(?:https?|file):\S+', '[url]', line, flags=re.I)
+        line = re.sub(r'(?<!\w)/[^\s\'"<>]*', '[path]', line)
+        line = re.sub(r'\b(?:Bearer|Basic)\s+\S+', '[credential]', line, flags=re.I)
+        line = re.sub(r'\b(?:token|password|secret|authorization|signature|credential)\b\s*[:=].*',
+                      '[credential]', line, flags=re.I)
+        line = re.sub(r'\S*[/\\\\]\S*', '[path]', line)
+        line = re.sub(r'[A-Za-z0-9_%+./=-]{24,}', '[opaque]', line)
+        result.append(line[:160])
+        if len(result) == 8:
+            break
+    return tuple(result)
+
+
 class AptConfigureError(ClosureError):
-    def __init__(self, reason):
+    def __init__(self, reason, errors=()):
         if reason not in APT_REASONS:
             raise ValueError('invalid APT diagnostic')
         super().__init__('APT configure rejected')
         self.reason = reason
+        self.errors = sanitize_apt_lines('\n'.join(errors).encode('ascii', errors='replace'))
 
 
 class AuthIndexError(ClosureError):
@@ -73,7 +94,7 @@ CLEANUP_STATES = frozenset(('not_attempted', 'succeeded', 'failed'))
 
 
 class DiagnosticError(Exception):
-    def __init__(self, where, kind, category, code=None, cleanup='not_attempted', reason=None):
+    def __init__(self, where, kind, category, code=None, cleanup='not_attempted', reason=None, errors=()):
         if (where not in STAGES or kind not in KINDS or category not in CATEGORIES
                 or cleanup not in CLEANUP_STATES or (code is not None and
                 (category != 'command_exit' or type(code) is not int or not 1 <= code <= 255))
@@ -84,6 +105,8 @@ class DiagnosticError(Exception):
         super().__init__('closure operation failed')
         self.where, self.kind, self.category, self.code, self.cleanup = where, kind, category, code, cleanup
         self.reason = reason
+        self.errors = (sanitize_apt_lines('\n'.join(errors).encode('ascii', errors='replace'))
+                       if where == 'configure' else ())
 
 
 def classify(exc):
@@ -120,7 +143,10 @@ def diagnostic_message(exc):
         message += f' code={exc.code}'
     if exc.reason is not None:
         message += f' reason={exc.reason}'
-    return message + f' cleanup={exc.cleanup}'
+    message += f' cleanup={exc.cleanup}'
+    if exc.errors:
+        message += '\napt_errors=' + json.dumps(exc.errors, ensure_ascii=True)
+    return message
 
 
 @contextmanager
@@ -139,7 +165,8 @@ def stage(where, kind='none'):
             reason = exc.reason
         if where == 'configure' and type(exc) is AptConfigureError and exc.reason in APT_REASONS:
             reason = exc.reason
-        raise DiagnosticError(where, kind, category, code, cleanup, reason) from exc
+        errors = exc.errors if where == 'configure' and type(exc) is AptConfigureError else ()
+        raise DiagnosticError(where, kind, category, code, cleanup, reason, errors) from exc
 
 
 @contextmanager
@@ -530,15 +557,22 @@ CONFIGURE = ("set -eu; rm -f /etc/apt/sources.list.d/*; "
              "elif grep -Eqi 'decompress|unsupported compression|unsupported.*xz' \"$log\"; then reason=compression; "
              "elif grep -Eqi 'File not found|No such file or directory|404[[:space:]]+Not Found' \"$log\"; then reason=not_found; "
              "else reason=unknown; fi; printf 'APT_RESULT=%s\\n' \"$reason\"; fi; "
+             "awk '/^[EW]:/ { if (++n <= 8) print substr($0, 1, 4096) }' \"$log\"; "
              "rm -f \"$log\" \"$log.overflow\"")
 
 
 def configure_result(data):
-    if data == b'APT_RESULT=ok\n':
+    if len(data) > 64 * 1024:
+        raise ClosureError('invalid APT diagnostic output')
+    marker, separator, remainder = data.partition(b'\n')
+    if not separator or any(not line.startswith((b'E:', b'W:')) for line in remainder.splitlines()):
+        raise ClosureError('invalid APT diagnostic output')
+    errors = sanitize_apt_lines(remainder)
+    if marker == b'APT_RESULT=ok' and not errors:
         return
     for reason in APT_REASONS:
-        if data == ('APT_RESULT=' + reason + '\n').encode('ascii'):
-            raise AptConfigureError(reason)
+        if marker == ('APT_RESULT=' + reason).encode('ascii'):
+            raise AptConfigureError(reason, errors)
     raise ClosureError('invalid APT diagnostic output')
 
 
