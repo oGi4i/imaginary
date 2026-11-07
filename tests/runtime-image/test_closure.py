@@ -30,6 +30,7 @@ class ClosureTest(unittest.TestCase):
         result = c.match_installed([('example', '1', 'amd64')], [('main', index)])
         self.assertEqual(result[0]['package'], package)
         self.assertEqual(result[0]['repository'], 'main')
+        self.assertEqual(result[0]['origins'], [{'repository': 'main', 'filename': package['Filename']}])
         self.assertEqual(c.verify_deb(package, b'data'), b'data')
 
     def test_missing_and_ambiguous_match_are_errors(self):
@@ -37,6 +38,28 @@ class ClosureTest(unittest.TestCase):
             c.match_installed([('example', '2', 'amd64')], [('main', [record()])])
         with self.assertRaises(c.ClosureError):
             c.match_installed([('example', '1', 'amd64')], [('main', [record(), record()])])
+
+    def test_equivalent_overlapping_signed_records_keep_both_origins(self):
+        main = record('libidn2-0', '2.0.5-1+deb10u1')
+        security = dict(main, Filename='pool/updates/main/libi/libidn2/libidn2-0.deb')
+        result = c.match_installed([('libidn2-0', '2.0.5-1+deb10u1', 'amd64')],
+                                   [('security', [security]), ('main', [main])])
+        self.assertEqual(result[0]['repository'], 'main')
+        self.assertEqual(result[0]['package'], main)
+        self.assertEqual(result[0]['origins'], [
+            {'repository': 'main', 'filename': main['Filename']},
+            {'repository': 'security', 'filename': security['Filename']}])
+
+    def test_overlapping_conflicting_records_fail(self):
+        main = record()
+        for field, value in [('SHA256', '0' * 64), ('Size', '9'),
+                             ('Depends', 'different'), ('Provides', 'changed (= 9)'),
+                             ('Multi-Arch', 'allowed')]:
+            changed = dict(main, **{field: value})
+            with self.subTest(field=field), self.assertRaises(c.ClosureError):
+                c.match_installed([('example', '1', 'amd64')], [('main', [main]), ('security', [changed])])
+        with self.assertRaises(c.ClosureError):
+            c.match_installed([('example', '1', 'amd64')], [('main', [main, main])])
 
     def test_corrupt_index_and_deb_fail(self):
         blob = lzma.compress(b'Package: example\n\n')

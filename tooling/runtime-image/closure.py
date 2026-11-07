@@ -341,7 +341,7 @@ class MatchError(ClosureError):
 
 
 def match_installed(installed, indexes):
-    """Require a unique exact package/version/architecture in signed indexes."""
+    """Match exact installed versions, retaining equivalent signed origins."""
     by_key = {}
     for repository, records in indexes:
         if repository not in ('main', 'security'):
@@ -358,11 +358,20 @@ def match_installed(installed, indexes):
         matches = by_key.get(key, [])
         if not matches:
             raise MatchError('base_missing')
-        if len(matches) != 1:
+        for _, package in matches:
+            _validate_package(package)
+        # An index must not repeat a tuple; repositories may carry the same deb
+        # at different pool paths. Every other retained field must agree.
+        if len({repo for repo, _ in matches}) != len(matches):
             raise MatchError('base_ambiguous')
+        matches.sort(key=lambda entry: (entry[0] != 'main', entry[0]))
         repository, package = matches[0]
-        _validate_package(package)
-        result.append({'repository': repository, 'package': package})
+        canonical = {key: value for key, value in package.items() if key != 'Filename'}
+        if any({key: value for key, value in other.items() if key != 'Filename'} != canonical
+               for _, other in matches[1:]):
+            raise MatchError('base_ambiguous')
+        origins = [{'repository': repo, 'filename': other['Filename']} for repo, other in matches]
+        result.append({'repository': repository, 'package': package, 'origins': origins})
     if not result:
         raise ClosureError('empty installed inventory')
     return result
