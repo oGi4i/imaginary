@@ -269,6 +269,14 @@ class ClosureTest(unittest.TestCase):
         creates = [args for args in runner.calls if args[1] == 'create']
         self.assertEqual(len(creates), 2)
         self.assertTrue(all('--network=none' in args for args in creates))
+        approved = {'--cap-add=CHOWN', '--cap-add=DAC_OVERRIDE', '--cap-add=FOWNER',
+                    '--cap-add=SETUID', '--cap-add=SETGID'}
+        for args in creates:
+            self.assertIn('--cap-drop=ALL', args)
+            self.assertEqual({arg for arg in args if arg.startswith('--cap-add=')}, approved)
+            self.assertIn('--security-opt=no-new-privileges', args)
+            self.assertFalse(any(arg.startswith(('--privileged', '--volume', '--mount')) for arg in args))
+        self.assertNotIn('APT::Sandbox::User', c.APT_OPTIONS + c.CONFIGURE)
         self.assertEqual(len([args for args in runner.calls if args[1:3] == ['rm', '-f']]), 2)
 
     def test_cache_copy_uses_verified_downloads_and_rejects_collisions(self):

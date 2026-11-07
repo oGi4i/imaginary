@@ -663,7 +663,9 @@ def collect(document, temp, run):
         try:
             with stage('create', kind):
                 run(['docker', 'create', '--name', name, '--platform=linux/amd64', '--network=none',
-                     '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
+                     '--cap-drop=ALL', '--cap-add=CHOWN', '--cap-add=DAC_OVERRIDE',
+                     '--cap-add=FOWNER', '--cap-add=SETUID', '--cap-add=SETGID',
+                     '--security-opt=no-new-privileges', '--pids-limit=512',
                      '--memory=4g', '--cpus=2', '--pull=never', '--entrypoint=/bin/sh', image,
                      '-c', 'while :; do sleep 60; done'], timeout=30)
             with stage('start', kind):
