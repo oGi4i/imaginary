@@ -38,6 +38,19 @@ class BuilderPolicyTests(unittest.TestCase):
     def test_daemon_accepts_contract(self):
         policy.validate_daemon([daemon()], 'daemon', 'state')
 
+    def test_daemon_accepts_only_privileged_label_normalization(self):
+        for options in (None, [], ['label=disable']):
+            d = daemon(); d['HostConfig']['SecurityOpt'] = options
+            with self.subTest(options=options):
+                policy.validate_daemon([d], 'daemon', 'state')
+        for options in (['label=disable', 'label=disable'], ['label:disable'],
+                        ['seccomp=unconfined'], ['apparmor=unconfined'],
+                        ['label=disable', 'seccomp=unconfined'],
+                        ['seccomp=unconfined', 'label=disable'], {}, 'label=disable'):
+            d = daemon(); d['HostConfig']['SecurityOpt'] = options
+            with self.subTest(options=options), self.assertRaisesRegex(ValueError, '^security_opt$'):
+                policy.validate_daemon([d], 'daemon', 'state')
+
     def test_daemon_rejects_mutations(self):
         mutations = [
             ('Config', 'Image', 'wrong'), ('Config', 'User', '1000'),

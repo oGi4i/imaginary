@@ -9,6 +9,10 @@ the actual daemon configuration and a network-disabled nested RUN before the
 candidate build. A mismatch stops the job. The RUN contract permits the default
 14 capabilities, UID 0, and NoNewPrivileges 0; seccomp must be active. AppArmor
 state is recorded from a bounded allowlist, not assumed to be Docker's profile.
+The daemon validator accepts Docker's exact privileged-container normalization
+`SecurityOpt: ["label=disable"]`, as well as empty options. Extra entries and
+explicit seccomp/AppArmor overrides remain rejected. This does not constrain the
+privileged daemon as an ordinary unprivileged Docker container.
 
 The disposable VM is the security boundary. A compromised build may control the
 VM and its ephemeral GitHub credentials. The experiment has no private credentials,

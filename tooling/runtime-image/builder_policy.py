@@ -56,9 +56,12 @@ def validate_daemon(value, name, volume):
         for key, reason in (('PortBindings', 'port_bindings'), ('Binds', 'binds'),
                             ('Devices', 'devices'), ('DeviceRequests', 'device_requests'),
                             ('DeviceCgroupRules', 'device_cgroup_rules'), ('CapAdd', 'cap_add'),
-                            ('CapDrop', 'cap_drop'), ('SecurityOpt', 'security_opt'),
-                            ('GroupAdd', 'group_add'), ('VolumesFrom', 'volumes_from')):
+                            ('CapDrop', 'cap_drop'), ('GroupAdd', 'group_add'),
+                            ('VolumesFrom', 'volumes_from')):
             require(h[key] in (None, [], {}), reason)
+        # Moby adds this exact SELinux option for privileged containers. It is not
+        # permission to add seccomp/AppArmor overrides or other security options.
+        require(h['SecurityOpt'] in (None, [], ['label=disable']), 'security_opt')
         require(not h['PublishAllPorts'], 'publish_ports')
         for key, reason in (('PidMode', 'pid_mode'), ('UTSMode', 'uts_mode'), ('UsernsMode', 'userns_mode')):
             require(h[key] == '', reason)
