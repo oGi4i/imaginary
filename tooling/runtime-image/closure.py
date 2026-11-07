@@ -86,7 +86,7 @@ class AuthIndexError(ClosureError):
 
 STAGES = frozenset(('input', 'setup', 'base_pull', 'base_inspect', 'create', 'start', 'base_inventory',
                     'keyring', 'auth_index', 'mirror', 'configure', 'pre_inventory', 'solver',
-                    'download', 'install', 'check', 'post', 'graph', 'cleanup', 'publish'))
+                    'download', 'cache_setup', 'cache_copy', 'install', 'check', 'post', 'graph', 'cleanup', 'publish'))
 KINDS = frozenset(('none', 'build', 'runtime'))
 CATEGORIES = frozenset(('published_cleanup', 'command_exit', 'command_error', 'timeout',
                         'closure_error', 'invalid_data', 'io_error', 'other'))
@@ -699,7 +699,9 @@ def collect(document, temp, run):
                 selected = match_installed(plan, indexes) if plan else []
             with stage('download', kind):
                 download_payloads(selected, mirror)
+            with stage('cache_setup', kind):
                 run(['docker', 'exec', name, '/bin/sh', '-c', 'chmod 755 /var/cache/apt/archives'], timeout=30)
+            with stage('cache_copy', kind):
                 copy_archives(selected, mirror, name, run)
             with stage('install', kind):
                 install = ('DEBIAN_FRONTEND=noninteractive apt-get ' + APT_OPTIONS

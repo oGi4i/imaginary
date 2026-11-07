@@ -53,8 +53,11 @@ actually succeeds; code or mocked tests alone do not establish a closure.
 For failed offline APT configuration, CI may retain at most eight sanitized
 `E:`/`W:` lines, each capped at 160 characters. URLs, paths, controls and
 credential-like values are redacted before publication. The bounded log stays
-inside the disposable container; signature checks, APT sandboxing and container
-privileges remain unchanged.
+inside the disposable container. Signature checks and APT sandboxing stay enabled.
+The network-disabled package containers retain `cap-drop=ALL` and add only CHOWN,
+DAC_OVERRIDE, FOWNER, SETUID and SETGID for package ownership and APT privilege
+separation. They have no host mounts or credentials; reference probes and serving
+workload security settings remain unchanged.
 
 The separate reference job inventories the public reference image. Reference
 features and candidate images remain unqualified, and the discovery job ends

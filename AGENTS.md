@@ -51,6 +51,9 @@ not be downgraded to optional missing tools. The closure helper resolves separat
 build/runtime package states in network-disabled CI containers from verified
 snapshot metadata and package payloads. Local tests mock container commands;
 actual closure evidence requires CI success and is not image reproducibility.
+Only disposable offline package containers add CHOWN, DAC_OVERRIDE, FOWNER, SETUID
+and SETGID to the otherwise dropped capability set so APT can retain its sandbox.
+Reference probes and serving workloads do not inherit those build capabilities.
 
 ## Verification and limits
 

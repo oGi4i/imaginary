@@ -279,6 +279,41 @@ class ClosureTest(unittest.TestCase):
         self.assertNotIn('APT::Sandbox::User', c.APT_OPTIONS + c.CONFIGURE)
         self.assertEqual(len([args for args in runner.calls if args[1:3] == ['rm', '-f']]), 2)
 
+    def test_download_substages_distinguish_cache_setup_and_copy(self):
+        for failing_step in ('cache_setup', 'cache_copy'):
+            calls = []
+            def runner(args, **kwargs):
+                calls.append(args)
+                if args[1:3] == ['image', 'inspect']:
+                    return json.dumps([{'Id': 'sha256:' + 'a' * 64, 'Os': 'linux',
+                        'Architecture': 'amd64', 'Config': {'Volumes': None},
+                        'RepoDigests': [c.BASE_IMAGE]}]).encode()
+                if args[1] == 'exec' and args[-1] == c.DPKG_QUERY:
+                    return b'ii \texample\t1\tamd64\n'
+                if args[1] == 'exec' and args[-1] == c.CONFIGURE:
+                    return b'APT_RESULT=ok\n'
+                if args[1] == 'exec' and args[-1].startswith(c.SIMULATE):
+                    return b''
+                if args[1] == 'exec' and 'chmod 755 /var/cache/apt/archives' in args[-1] and failing_step == 'cache_setup':
+                    raise c.reference.ProbeExit(1)
+                return b''
+            def copy(*args):
+                if failing_step == 'cache_copy':
+                    raise c.reference.ProbeExit(1)
+            doc = {'platform': 'linux/amd64', 'snapshot': {}, 'base': {'manifest': c.discovery.BASE,
+                   'config': 'sha256:' + 'a' * 64}}
+            with tempfile.TemporaryDirectory() as tmp, \
+                    mock.patch.object(c, 'authenticated_indexes', return_value=[('main', [record()])]), \
+                    mock.patch.object(c, 'download_payloads'), mock.patch.object(c, 'write_mirror'), \
+                    mock.patch.object(c, 'copy_archives', side_effect=copy), \
+                    self.assertRaises(c.DiagnosticError) as caught:
+                c.collect(doc, Path(tmp), runner)
+            self.assertEqual(caught.exception.where, failing_step)
+            self.assertEqual(caught.exception.kind, 'build')
+            self.assertEqual(caught.exception.code, 1)
+            self.assertEqual(caught.exception.cleanup, 'succeeded')
+            self.assertNotIn('example', c.diagnostic_message(caught.exception))
+
     def test_cache_copy_uses_verified_downloads_and_rejects_collisions(self):
         calls = []
         rows = [{'repository': 'main', 'package': record(), 'download_path': 'payload/package.deb'}]
