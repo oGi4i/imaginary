@@ -1,6 +1,7 @@
 package sourcelock
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -59,12 +60,15 @@ func TestV1LegacyImageReference(t *testing.T) {
 }
 
 func TestCommittedV2LockIsIncomplete(t *testing.T) {
-	f, err := os.Open("../../docs/runtime-image.lock.yaml")
+	data, err := os.ReadFile("../../docs/runtime-image.lock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	missing, err := Validate(f)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := Validate(strings.NewReader(string(data)))
 	if err != nil {
 		t.Fatalf("committed lock is invalid: %v", err)
 	}
@@ -73,6 +77,9 @@ func TestCommittedV2LockIsIncomplete(t *testing.T) {
 			t.Errorf("verified metadata unexpectedly unresolved: %s", got)
 		}
 	}
+	if string(fields["features"]) != "null" {
+		t.Error("feature evidence must remain unresolved")
+	}
 	for _, name := range []string{"build_packages", "runtime_packages", "features"} {
 		found := false
 		for _, got := range missing {
@@ -80,8 +87,8 @@ func TestCommittedV2LockIsIncomplete(t *testing.T) {
 				found = true
 			}
 		}
-		if !found {
-			t.Errorf("missing unresolved path %q", name)
+		if found != (string(fields[name]) == "null") {
+			t.Errorf("unresolved path %q does not match lock", name)
 		}
 	}
 }

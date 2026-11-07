@@ -64,3 +64,9 @@ Package roots and build flags record the recipe intent, not a resolved closure.
 The module hashes identify the tracked files, and `source_date_epoch` is the
 upstream baseline commit timestamp. Package closures and features remain
 unresolved. Discovery evidence is not itself a package closure or qualification.
+
+`tooling/runtime-image/populate_lock.py` provides a pure transformation of
+closure evidence into a new lock object; it does not access files, authenticate
+metadata, or authorize a build. It records `base` when the exact identity appears
+in the base inventory, not as proof of the original installed deb. The consumer
+must independently authenticate indexes and recompute package matches and edges.
