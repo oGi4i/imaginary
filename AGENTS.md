@@ -39,7 +39,11 @@ metadata workflow and helpers are incomplete discovery preparation; see
 `docs/runtime-inputs.md`. Its tests use mocked public metadata locally. Actual
 input discovery and native reference inventory belong on GitHub-hosted runners,
 not local execution. Unknown package closures and feature evidence stay missing;
-a discovery artifact is not a locked or reproducible candidate image.
+a discovery artifact is not a locked or reproducible candidate image. The separate
+reference-inventory job uses fixed read-only probes in the pinned public image;
+see `docs/reference-inventory.md`. Missing native/ELF tools yield incomplete
+evidence, not feature equivalence. Fatal supervision/identity/cleanup errors must
+not be downgraded to optional missing tools.
 
 ## Verification and limits
 

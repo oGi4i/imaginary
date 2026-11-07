@@ -54,7 +54,10 @@ and source-lock CLI validate structure and list unresolved inputs. They do not
 authenticate the lock or build an image; see [candidate image](docs/candidate-image.md).
 The separate [runtime-input discovery](docs/runtime-inputs.md) workflow is
 incomplete preparation for authenticated inputs and reference inventory. It does
-not produce a candidate image or establish reproducibility.
+not produce a candidate image or establish reproducibility. Its independent
+[published-reference inventory](docs/reference-inventory.md) job records only
+available parsed package/native observations; missing tools leave evidence
+incomplete.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image

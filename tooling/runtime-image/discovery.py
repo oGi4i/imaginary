@@ -33,6 +33,35 @@ MEDIA = ', '.join(['application/vnd.oci.image.manifest.v1+json',
                    'application/vnd.docker.distribution.manifest.v2+json'])
 
 
+class DiscoveryError(Exception):
+    pass
+
+
+@contextmanager
+def stage(name):
+    try:
+        yield
+    except DiscoveryError:
+        raise
+    except Exception as error:
+        if (isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) or
+                isinstance(error, urllib.error.URLError) and isinstance(error.reason, TimeoutError)):
+            category = 'timeout'
+        elif isinstance(error, urllib.error.HTTPError):
+            category = 'http'
+        elif isinstance(error, urllib.error.URLError):
+            category = 'network'
+        elif isinstance(error, subprocess.CalledProcessError):
+            category = 'process'
+        elif isinstance(error, (ValueError, KeyError, TypeError)):
+            category = 'invalid'
+        elif isinstance(error, OSError):
+            category = 'io'
+        else:
+            category = 'other'
+        raise DiscoveryError(name + ': ' + category) from None
+
+
 def verify_digest(data, digest):
     if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest) or 'sha256:' + hashlib.sha256(data).hexdigest() != digest:
         raise ValueError('digest mismatch')
@@ -197,14 +226,18 @@ def snapshot_metadata(keyring):
     results = {}
     for name, dist, archive in [('main', 'buster', 'debian'), ('security', 'buster/updates', 'debian-security')]:
         root = 'https://snapshot.debian.org/archive/' + archive + '/20240408T000000Z/'
-        inrelease = fetch(root + 'dists/' + dist + '/InRelease')
-        verify_digest(inrelease, 'sha256:' + RELEASES[name]['sha256'])
-        release = verify_inrelease(inrelease, keyring, SIGNERS[name])
-        fields = release_fields(release)
-        check_release(fields, name)
+        with stage('snapshot_' + name + '_fetch'):
+            inrelease = fetch(root + 'dists/' + dist + '/InRelease')
+            verify_digest(inrelease, 'sha256:' + RELEASES[name]['sha256'])
+        with stage('snapshot_' + name + '_gpgv'):
+            release = verify_inrelease(inrelease, keyring, SIGNERS[name])
+        with stage('snapshot_' + name + '_identity'):
+            fields = release_fields(release)
+            check_release(fields, name)
         index_path = 'main/binary-amd64/Packages.xz'
-        index = fetch(root + 'dists/' + dist + '/' + index_path)
-        verify_index(release, index_path, index)
+        with stage('snapshot_' + name + '_index'):
+            index = fetch(root + 'dists/' + dist + '/' + index_path)
+            verify_index(release, index_path, index)
         results[name] = {'inrelease_url': root + 'dists/' + dist + '/InRelease',
                          'inrelease_sha256': hashlib.sha256(inrelease).hexdigest(),
                          'signer_primary_fingerprint': SIGNERS[name],
@@ -223,8 +256,10 @@ def main():
     parser.add_argument('--keyring', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
-    base = registry_manifest('library/debian', BASE)
-    go = go_archive(json.loads(fetch('https://go.dev/dl/?mode=json&include=all')))
+    with stage('base_registry'):
+        base = registry_manifest('library/debian', BASE)
+    with stage('go_json'):
+        go = go_archive(json.loads(fetch('https://go.dev/dl/?mode=json&include=all')))
     snapshot = snapshot_metadata(args.keyring.resolve())
     result = {'platform': 'linux/amd64', 'base': base, 'go': go, 'snapshot': snapshot,
               'build_packages': None, 'runtime_packages': None, 'reference_inventory': None,
@@ -236,6 +271,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except DiscoveryError as error:
+        print('runtime input discovery failed at ' + str(error), file=sys.stderr)
+        sys.exit(1)
     except Exception:
-        print('runtime input discovery failed; no verified evidence was written', file=sys.stderr)
+        print('runtime input discovery failed at other: other', file=sys.stderr)
         sys.exit(1)

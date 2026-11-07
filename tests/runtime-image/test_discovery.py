@@ -70,7 +70,7 @@ class DiscoveryTest(unittest.TestCase):
             target = Path(tmp) / 'evidence.json'
             with mock.patch.object(d, 'registry_manifest', side_effect=ValueError('bad digest')), \
                  mock.patch('sys.argv', ['discovery', '--keyring', 'keyring', '--output', str(target)]), \
-                 self.assertRaises(ValueError):
+                 self.assertRaises(d.DiscoveryError):
                 d.main()
             self.assertFalse(target.exists())
 
@@ -121,6 +121,38 @@ class DiscoveryTest(unittest.TestCase):
                                '--keyring', 'keyring', '--output', 'output'],
                               capture_output=True, text=True)
         self.assertNotEqual(proc.returncode, 0)
+        self.assertNotIn('private', proc.stderr)
+        self.assertNotIn('Traceback', proc.stderr)
+
+    def test_diagnostics_are_stage_scoped_and_redacted(self):
+        for stage in ('base_registry', 'go_json', 'snapshot_main_fetch', 'snapshot_main_gpgv',
+                      'snapshot_main_index', 'snapshot_security_fetch', 'snapshot_security_gpgv',
+                      'snapshot_security_index'):
+            with self.subTest(stage=stage):
+                with self.assertRaises(d.DiscoveryError) as raised:
+                    with d.stage(stage):
+                        raise urllib.error.URLError('signed=private')
+                self.assertEqual(str(raised.exception), stage + ': network')
+                self.assertNotIn('private', str(raised.exception))
+        with self.assertRaises(d.DiscoveryError) as raised:
+            with d.stage('snapshot_main_gpgv'):
+                raise subprocess.TimeoutExpired('private', 30)
+        self.assertEqual(str(raised.exception), 'snapshot_main_gpgv: timeout')
+        with self.assertRaises(d.DiscoveryError) as raised:
+            with d.stage('base_registry'):
+                raise urllib.error.URLError(TimeoutError('private'))
+        self.assertEqual(str(raised.exception), 'base_registry: timeout')
+
+    def test_cli_redacted_diagnostic_has_registry_stage(self):
+        script = ('import runpy, urllib.error, urllib.request\n'
+                  'def fail(*args, **kwargs):\n'
+                  '    raise urllib.error.URLError("signed=private")\n'
+                  'urllib.request.OpenerDirector.open = fail\n'
+                  f'runpy.run_path({str(PATH)!r}, run_name="__main__")\n')
+        proc = subprocess.run([sys.executable, '-I', '-B', '-c', script,
+                               '--keyring', 'keyring', '--output', 'output'],
+                              capture_output=True, text=True)
+        self.assertIn('base_registry: network', proc.stderr)
         self.assertNotIn('private', proc.stderr)
         self.assertNotIn('Traceback', proc.stderr)
 

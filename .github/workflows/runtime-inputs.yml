@@ -48,3 +48,26 @@ jobs:
         run: |
           echo 'Package closures and reference inventory are not yet collected.' >&2
           exit 1
+
+  reference-inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test reference inventory helper
+        run: python3 -I -m unittest discover -s tests/runtime-image -p test_reference_inventory.py -v
+      - name: Collect isolated reference inventory
+        run: |
+          mkdir -p "$RUNNER_TEMP/reference-inventory"
+          python3 -I tooling/runtime-image/reference_inventory.py \
+            --output "$RUNNER_TEMP/reference-inventory/inventory.json"
+      - name: Upload reference inventory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: reference-inventory
+          path: ${{ runner.temp }}/reference-inventory/inventory.json
+          if-no-files-found: warn
+          retention-days: 7
