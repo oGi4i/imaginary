@@ -1,7 +1,11 @@
 """Offline tests for the hosted builder contract."""
 import importlib.util
+import io
+import json
 from pathlib import Path
 import unittest
+from contextlib import redirect_stderr
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location('builder_policy', ROOT / 'tooling/runtime-image/builder_policy.py')
@@ -55,6 +59,26 @@ class BuilderPolicyTests(unittest.TestCase):
         for mount in ([], [{'Type': 'bind', 'Destination': '/var/lib/buildkit'}], daemon()['Mounts'] * 2):
             d = daemon(); d['Mounts'] = mount
             with self.assertRaises(ValueError): policy.validate_daemon([d], 'daemon', 'state')
+
+    def test_daemon_reports_only_fixed_failure_codes(self):
+        for section, field, value, reason in [
+                ('Config', 'Image', 'https://private.invalid/token', 'image'),
+                ('HostConfig', 'SecurityOpt', ['private-path-secret'], 'security_opt'),
+                ('HostConfig', 'CgroupnsMode', 'host', 'cgroupns_mode')]:
+            d = daemon(); d[section][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, '^' + reason + '$'):
+                policy.validate_daemon([d], 'daemon', 'state')
+        d = daemon(); del d['HostConfig']['Binds']
+        with self.assertRaisesRegex(ValueError, '^inspect_shape$'):
+            policy.validate_daemon([d], 'daemon', 'state')
+        stderr = io.StringIO()
+        with mock.patch.object(policy, 'identity'), mock.patch.object(policy, 'read_bounded', return_value=json.dumps(d).encode()), \
+                mock.patch('sys.argv', ['builder_policy', 'daemon', '--input', 'private-path',
+                                      '--name', 'runtime-one-1-1-daemon', '--volume', 'runtime-one-1-1-daemon-state']), \
+                redirect_stderr(stderr):
+            self.assertEqual(policy.main(), 1)
+        self.assertRegex(stderr.getvalue(), r'^builder policy validation failed reason=[a-z_]+\n$')
+        self.assertNotIn('private', stderr.getvalue())
 
     def test_preflight_contract_and_mutations(self):
         policy.validate_preflight(observation())

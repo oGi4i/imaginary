@@ -16,9 +16,18 @@ FIELDS = {'Uid': '0 0 0 0', 'CapEff': '00000000a80425fb', 'CapPrm': '00000000a80
 APPARMOR = {'docker-default (enforce)', 'unconfined'}
 
 
-def require(condition):
+REASONS = frozenset(('mismatch', 'inspect_shape', 'name', 'running', 'image', 'user',
+                     'entrypoint', 'command', 'privileged', 'network_mode', 'port_bindings',
+                     'binds', 'devices', 'device_requests', 'device_cgroup_rules', 'cap_add',
+                     'cap_drop', 'security_opt', 'group_add', 'volumes_from', 'publish_ports',
+                     'pid_mode', 'uts_mode', 'userns_mode', 'ipc_mode', 'cgroupns_mode',
+                     'memory', 'cpus', 'pids_limit', 'network_ports', 'networks', 'mounts',
+                     'invalid_input'))
+
+
+def require(condition, reason='mismatch'):
     if not condition:
-        raise ValueError('builder policy mismatch')
+        raise ValueError(reason if reason in REASONS else 'mismatch')
 
 
 def identity(env):
@@ -32,29 +41,39 @@ def identity(env):
 
 
 def validate_daemon(value, name, volume):
-    require(isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict))
+    require(isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict), 'inspect_shape')
     d = value[0]
     try:
         c, h, n = d['Config'], d['HostConfig'], d['NetworkSettings']
-        require(d['Name'] == '/' + name and d['State']['Running'] is True)
-        require(c['Image'] == IMAGE and c['User'] in ('', '0', 'root'))
-        require(c['Entrypoint'] == ['/usr/bin/buildkitd'] and c['Cmd'] == ['--config', '/dev/null', '--cdi-disabled'])
-        require(h['Privileged'] is True and h['NetworkMode'] == 'bridge')
-        for key in ('PortBindings', 'Binds', 'Devices', 'DeviceRequests', 'DeviceCgroupRules',
-                    'CapAdd', 'CapDrop', 'SecurityOpt', 'GroupAdd', 'VolumesFrom'):
-            require(h[key] in (None, [], {}))
-        require(not h['PublishAllPorts'] and not h['NetworkMode'].startswith('container:'))
-        for key in ('PidMode', 'UTSMode', 'UsernsMode'):
-            require(h[key] == '')
-        require(h['IpcMode'] in ('private', '') and h['CgroupnsMode'] in ('private', ''))
-        require(h['Memory'] == 4294967296 and h['NanoCpus'] == 2000000000 and h['PidsLimit'] == 1024)
-        require(isinstance(n['Ports'], dict) and all(v is None or v == [] for v in n['Ports'].values()))
-        require(set(n['Networks']) == {'bridge'})
+        require(d['Name'] == '/' + name, 'name')
+        require(d['State']['Running'] is True, 'running')
+        require(c['Image'] == IMAGE, 'image')
+        require(c['User'] in ('', '0', 'root'), 'user')
+        require(c['Entrypoint'] == ['/usr/bin/buildkitd'], 'entrypoint')
+        require(c['Cmd'] == ['--config', '/dev/null', '--cdi-disabled'], 'command')
+        require(h['Privileged'] is True, 'privileged')
+        require(h['NetworkMode'] == 'bridge', 'network_mode')
+        for key, reason in (('PortBindings', 'port_bindings'), ('Binds', 'binds'),
+                            ('Devices', 'devices'), ('DeviceRequests', 'device_requests'),
+                            ('DeviceCgroupRules', 'device_cgroup_rules'), ('CapAdd', 'cap_add'),
+                            ('CapDrop', 'cap_drop'), ('SecurityOpt', 'security_opt'),
+                            ('GroupAdd', 'group_add'), ('VolumesFrom', 'volumes_from')):
+            require(h[key] in (None, [], {}), reason)
+        require(not h['PublishAllPorts'], 'publish_ports')
+        for key, reason in (('PidMode', 'pid_mode'), ('UTSMode', 'uts_mode'), ('UsernsMode', 'userns_mode')):
+            require(h[key] == '', reason)
+        require(h['IpcMode'] in ('private', ''), 'ipc_mode')
+        require(h['CgroupnsMode'] in ('private', ''), 'cgroupns_mode')
+        require(h['Memory'] == 4294967296, 'memory')
+        require(h['NanoCpus'] == 2000000000, 'cpus')
+        require(h['PidsLimit'] == 1024, 'pids_limit')
+        require(isinstance(n['Ports'], dict) and all(v is None or v == [] for v in n['Ports'].values()), 'network_ports')
+        require(set(n['Networks']) == {'bridge'}, 'networks')
         mounts = d['Mounts']
         require(len(mounts) == 1 and mounts[0]['Type'] == 'volume' and mounts[0]['Name'] == volume
-                and mounts[0]['Destination'] == '/var/lib/buildkit' and mounts[0]['RW'] is True)
+                and mounts[0]['Destination'] == '/var/lib/buildkit' and mounts[0]['RW'] is True, 'mounts')
     except (KeyError, TypeError, IndexError):
-        raise ValueError('builder policy mismatch') from None
+        raise ValueError('inspect_shape') from None
 
 
 def validate_preflight(value):
@@ -114,8 +133,9 @@ def main():
             report = {'source_sha': os.environ['GITHUB_SHA'], 'buildkit': IMAGE, 'frontend': FRONTEND,
                       'base': BASE, 'daemon': args.name, 'platform': 'linux/amd64', 'run': result}
             Path(args.report).write_text(json.dumps(report, sort_keys=True) + '\n')
-    except (ValueError, TypeError, OSError, json.JSONDecodeError):
-        print('builder policy validation failed', file=sys.stderr)
+    except (ValueError, TypeError, OSError, json.JSONDecodeError) as exc:
+        reason = str(exc) if type(exc) is ValueError and str(exc) in REASONS else 'invalid_input'
+        print('builder policy validation failed reason=' + reason, file=sys.stderr)
         return 1
     return 0
 
