@@ -490,7 +490,7 @@ def resolve_edges(rows, compare):
             if field == 'Provides':
                 continue
             for group in groups:
-                candidates = []
+                candidates = {}
                 for alternative in group:
                     name, _, qualifier = alternative['name'].partition(':')
                     for candidate, version in providers.get(name, []):
@@ -501,12 +501,14 @@ def resolve_edges(rows, compare):
                         if 'operator' in alternative and (version is None or not compare(
                                 version, alternative['operator'], alternative['version'])):
                             continue
-                        candidates.append((candidate, name, version, alternative))
+                        identity = (candidate['Package'], candidate['Version'], candidate['Architecture'])
+                        # First matching alternative is a witness, not an APT solver choice.
+                        candidates.setdefault(identity, (candidate, name, version, alternative))
                 if not candidates:
                     raise GraphError('missing_provider')
                 if len(candidates) != 1:
                     raise GraphError('ambiguous_provider')
-                candidate, name, version, choice = candidates[0]
+                candidate, name, version, choice = next(iter(candidates.values()))
                 edges.append({'source': {'name': package['Package'], 'version': package['Version'],
                                          'architecture': package['Architecture']},
                               'field': field, 'alternatives': group, 'choice': choice,

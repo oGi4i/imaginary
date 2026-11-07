@@ -590,6 +590,28 @@ class ClosureTest(unittest.TestCase):
         with self.assertRaises(c.ClosureError):
             c.resolve_edges(rows, lambda *args: False)
 
+    def test_same_provider_multiple_paths_has_one_witness(self):
+        source = record('source'); source.pop('Provides')
+        foo = record('foo'); foo.pop('Depends'); foo['Provides'] = 'virtual (= 1)'
+        for dependency in ('foo | virtual', 'foo | foo', 'virtual | foo'):
+            source['Depends'] = dependency
+            with self.subTest(dependency=dependency):
+                edges = c.resolve_edges([{'package': source}, {'package': foo}], lambda *args: True)
+                self.assertEqual(len(edges), 1)
+                self.assertEqual(edges[0]['provider'], {'name': 'foo', 'version': '1', 'architecture': 'amd64'})
+                self.assertEqual(edges[0]['choice']['name'], dependency.split(' | ')[0])
+                self.assertEqual(len(edges[0]['alternatives']), 2)
+
+    def test_distinct_provider_identities_remain_ambiguous(self):
+        source = record('source'); source.pop('Provides')
+        foo = record('foo'); foo.pop('Depends'); foo['Provides'] = 'virtual'
+        bar = record('bar'); bar.pop('Depends'); bar['Provides'] = 'virtual'
+        for dependency in ('foo | bar', 'virtual'):
+            source['Depends'] = dependency
+            with self.subTest(dependency=dependency), self.assertRaises(c.GraphError) as caught:
+                c.resolve_edges([{'package': source}, {'package': foo}, {'package': bar}], lambda *args: True)
+            self.assertEqual(caught.exception.reason, 'ambiguous_provider')
+
     def test_graph_reasons_are_fixed_and_do_not_expose_package_data(self):
         source = record('source')
         source.pop('Provides')
