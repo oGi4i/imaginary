@@ -615,6 +615,11 @@ def download_payloads(rows, directory):
         row['relations'] = relations(package)
 
 
+def prepare_cache(container, run):
+    run(['docker', 'exec', container, '/bin/sh', '-c',
+         'mkdir -p /var/cache/apt/archives && chmod 755 /var/cache/apt/archives'], timeout=30)
+
+
 def copy_archives(rows, directory, container, run):
     targets = []
     for row in rows:
@@ -700,7 +705,7 @@ def collect(document, temp, run):
             with stage('download', kind):
                 download_payloads(selected, mirror)
             with stage('cache_setup', kind):
-                run(['docker', 'exec', name, '/bin/sh', '-c', 'chmod 755 /var/cache/apt/archives'], timeout=30)
+                prepare_cache(name, run)
             with stage('cache_copy', kind):
                 copy_archives(selected, mirror, name, run)
             with stage('install', kind):

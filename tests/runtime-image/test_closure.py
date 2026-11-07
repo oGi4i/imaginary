@@ -314,6 +314,18 @@ class ClosureTest(unittest.TestCase):
             self.assertEqual(caught.exception.cleanup, 'succeeded')
             self.assertNotIn('example', c.diagnostic_message(caught.exception))
 
+    def test_cache_setup_creates_missing_directory_before_chmod(self):
+        commands = []
+        def runner(argv, **kwargs):
+            commands.append(argv)
+            script = argv[-1]
+            if not script.startswith('mkdir -p /var/cache/apt/archives && '):
+                raise c.reference.ProbeExit(1)
+            return b''
+        c.prepare_cache('owned-container', runner)
+        self.assertEqual(commands, [['docker', 'exec', 'owned-container', '/bin/sh', '-c',
+                                      'mkdir -p /var/cache/apt/archives && chmod 755 /var/cache/apt/archives']])
+
     def test_cache_copy_uses_verified_downloads_and_rejects_collisions(self):
         calls = []
         rows = [{'repository': 'main', 'package': record(), 'download_path': 'payload/package.deb'}]
