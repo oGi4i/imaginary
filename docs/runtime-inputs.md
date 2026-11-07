@@ -19,10 +19,13 @@ and size of each amd64 Packages.xz against signed metadata. Historical metadata 
 Valid-Until: `gpgv` verifies signatures without enforcing that field. This is
 an explicit freshness exception, not permission to use unsigned metadata.
 Download, signature, fingerprint, digest, or parsing failures stop discovery.
-The helper permits HTTPS redirects only on the same origin, with a bounded hop
-count, response size and total fetch time. `gpgv` has a process timeout and
-bounded output. Cross-origin Go archive redirects are not yet supported; the
-archive payload is not fetched in this slice.
+The helper permits HTTPS redirects on the same origin. It also permits the
+registry's Debian blob GET to redirect to `production.cloudfront.docker.com`,
+without forwarding request headers or credentials. The config digest and size
+are verified after download. Redirect hops, response size and total fetch time
+are bounded. `gpgv` has a process timeout and bounded output. Cross-origin Go
+archive redirects are not yet supported; the archive payload is not fetched in
+this slice.
 
 The artifact `runtime-input-metadata` contains `discovery.json` with `platform`,
 `base`, `go`, `snapshot`, null `build_packages`, null `runtime_packages`, null

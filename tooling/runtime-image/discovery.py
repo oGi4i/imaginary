@@ -7,6 +7,7 @@ import re
 import resource
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -89,9 +90,15 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         source = urllib.parse.urlsplit(req.full_url)
         target = urllib.parse.urlsplit(urllib.parse.urljoin(req.full_url, newurl))
-        if target.scheme != 'https' or target.netloc != source.netloc:
-            raise urllib.error.HTTPError(newurl, code, 'unapproved redirect', headers, fp)
-        return super().redirect_request(req, fp, code, msg, headers, target.geturl())
+        if target.scheme == 'https' and target.netloc == source.netloc:
+            return super().redirect_request(req, fp, code, msg, headers, target.geturl())
+        registry_blob = (source.scheme == 'https' and source.netloc == 'registry-1.docker.io'
+                         and not source.query and not source.fragment
+                         and re.fullmatch(r'/v2/library/debian/blobs/sha256:[0-9a-f]{64}', source.path))
+        if (code == 307 and req.get_method() == 'GET' and registry_blob
+                and target.scheme == 'https' and target.netloc == 'production.cloudfront.docker.com'):
+            return urllib.request.Request(target.geturl(), method='GET')
+        raise urllib.error.HTTPError('', code, 'unapproved redirect', {}, None)
 
 
 def open_url(request):
@@ -227,4 +234,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:
+        print('runtime input discovery failed; no verified evidence was written', file=sys.stderr)
+        sys.exit(1)

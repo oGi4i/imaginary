@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 import tempfile
 import subprocess
+import sys
 import urllib.error
 
 PATH = Path(__file__).resolve().parents[2] / 'tooling/runtime-image/discovery.py'
@@ -83,6 +84,45 @@ class DiscoveryTest(unittest.TestCase):
         redirected = handler.redirect_request(request, None, 302, 'Found', {}, '/b')
         self.assertEqual(redirected.full_url, 'https://go.dev/b')
         self.assertLessEqual(handler.max_redirections, 5)
+
+    def test_registry_blob_redirect_to_approved_cdn_strips_credentials(self):
+        handler = d.SafeRedirect()
+        request = d.urllib.request.Request(
+            'https://registry-1.docker.io/v2/library/debian/blobs/sha256:' + 'a' * 64,
+            headers={'Authorization': 'Bearer secret', 'Cookie': 'session=secret', 'X-Api-Key': 'secret', 'Accept': 'application/json'})
+        request.add_unredirected_header('Proxy-Authorization', 'Basic secret')
+        cdn = 'https://production.cloudfront.docker.com/registry/blob?signature=secret'
+        redirected = handler.redirect_request(request, None, 307, 'Temporary Redirect', {}, cdn)
+        self.assertEqual(redirected.full_url, cdn)
+        self.assertEqual(redirected.header_items(), [])
+        for url in ('http://production.cloudfront.docker.com/x',
+                    'https://production.cloudfront.docker.com.evil.example/x',
+                    'https://user@production.cloudfront.docker.com/x',
+                    'https://production.cloudfront.docker.com:444/x'):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                handler.redirect_request(request, None, 307, 'Found', {}, url)
+            self.assertNotIn('secret', str(error.exception))
+            error.exception.close()
+        for source in ('https://registry-1.docker.io/v2/library/other/blobs/sha256:' + 'a' * 64,
+                       'https://registry-1.docker.io/v2/library/debian/manifests/sha256:' + 'a' * 64,
+                       'https://registry-1.docker.io/v2/library/debian/blobs/not-a-digest'):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                handler.redirect_request(d.urllib.request.Request(source), None, 307, 'Found', {}, cdn)
+            error.exception.close()
+
+    def test_cli_error_does_not_print_signed_url(self):
+        secret = 'https://production.cloudfront.docker.com/x?signature=private'
+        script = ('import runpy, urllib.error, urllib.request\n'
+                  'def fail(*args, **kwargs):\n'
+                  f'    raise urllib.error.URLError({secret!r})\n'
+                  'urllib.request.OpenerDirector.open = fail\n'
+                  f'runpy.run_path({str(PATH)!r}, run_name="__main__")\n')
+        proc = subprocess.run([sys.executable, '-I', '-B', '-c', script,
+                               '--keyring', 'keyring', '--output', 'output'],
+                              capture_output=True, text=True)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertNotIn('private', proc.stderr)
+        self.assertNotIn('Traceback', proc.stderr)
 
     def test_fetch_has_absolute_deadline(self):
         class Slow:
