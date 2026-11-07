@@ -10,6 +10,7 @@ class WorkflowTest(unittest.TestCase):
         text = WORKFLOW.read_text()
         discovery, reference = text.split('\n  reference-inventory:', 1)
         self.assertIn('timeout-minutes: 45', discovery)
+        self.assertIn('fetch-depth: 0', discovery)
         self.assertIn('python3 -I tooling/runtime-image/closure.py', discovery)
         self.assertIn('--discoveryJSON "$RUNNER_TEMP/runtime-inputs/discovery.json"', discovery)
         self.assertIn('--output "$RUNNER_TEMP/runtime-inputs/closure.json"', discovery)

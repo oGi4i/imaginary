@@ -35,7 +35,7 @@ func replaceOnce(t *testing.T, in, old, replacement string) string {
 const completeV2 = `{
   "schema_version": 2,
   "source": {"upstream_commit":"9357624e976790905f1b1bf4d059f8643c21e6fb","bimg_version":"1.1.4"},
-  "libvips": {"version":"8.10.0","archive_url":"https://example.test/vips.tar.gz","archive_sha256":"1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9"},
+  "libvips": {"version":"8.10.0","archive_url":"https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz","archive_sha256":"1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9"},
   "platform":"linux/amd64",
   "builder_image":"example.test/base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "runtime_image":"example.test/base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -81,6 +81,9 @@ func TestValidateV2(t *testing.T) {
 		t.Fatalf("incomplete v2: missing=%v err=%v", missing, err)
 	}
 	for _, tc := range [][2]string{
+		{`https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz`, `https://example.test/other.tar.gz`},
+		{`20240408T000000Z`, `20249999T999999Z`},
+		{`example.test/base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, `debian/bookworm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`},
 		{`"size":1`, `"size":0`},
 		{`"architecture":"amd64"`, `"architecture":"arm64"`},
 		{`"dependencies":[]`, `"dependencies":["absent"]`},

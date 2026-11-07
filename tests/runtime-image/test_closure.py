@@ -3,6 +3,7 @@ import importlib.util
 import lzma
 import json
 import tempfile
+import subprocess
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -84,7 +85,10 @@ class ClosureTest(unittest.TestCase):
             c.parse_index(blob, len(blob), hashlib.sha256(blob).hexdigest())
 
     def test_root_lists_match_reference_dockerfile(self):
-        dockerfile = (PATH.parents[2] / 'Dockerfile').read_text()
+        dockerfile = subprocess.run(
+            ['git', '-C', str(PATH.parents[2]), 'show',
+             '9357624e976790905f1b1bf4d059f8643c21e6fb:Dockerfile'],
+            check=True, capture_output=True, text=True, timeout=10).stdout
         import re
         matches = re.findall(r'apt-get install --no-install-recommends -y\s+(.+?)\s*&&', dockerfile, re.S)
         self.assertEqual(len(matches), 2)
@@ -131,7 +135,7 @@ class ClosureTest(unittest.TestCase):
     def test_guard_precedes_any_side_effects(self):
         with mock.patch.dict('os.environ', {}, clear=True), mock.patch.object(c, 'collect') as collect, \
                 mock.patch('sys.argv', ['closure', '--discoveryJSON', 'x', '--output', 'y']), \
-                self.assertRaises(c.ClosureError):
+                self.assertRaises(c.DiagnosticError):
             c.main()
         collect.assert_not_called()
 
@@ -240,8 +244,10 @@ class ClosureTest(unittest.TestCase):
             return b''
         document = {'platform': 'linux/amd64', 'base': {'manifest': c.discovery.BASE,
                     'config': 'sha256:' + 'a' * 64}}
-        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(c.ClosureError):
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(c.DiagnosticError) as failure:
             c.collect(document, Path(tmp), runner)
+        self.assertEqual(c.diagnostic_message(failure.exception),
+                         'closure failure stage=start kind=build category=closure_error cleanup=succeeded')
         self.assertEqual(len([args for args in calls if args[1:3] == ['rm', '-f']]), 1)
 
     def test_existing_output_is_never_overwritten(self):
@@ -250,7 +256,7 @@ class ClosureTest(unittest.TestCase):
             output.write_text('old')
             with mock.patch.dict('os.environ', {'GITHUB_ACTIONS': 'true'}, clear=True), \
                     mock.patch('sys.argv', ['closure', '--discoveryJSON', 'absent', '--output', str(output)]), \
-                    mock.patch.object(c, 'collect') as collect, self.assertRaises(c.ClosureError):
+                    mock.patch.object(c, 'collect') as collect, self.assertRaises(c.DiagnosticError):
                 c.main()
             collect.assert_not_called()
             self.assertEqual(output.read_text(), 'old')
@@ -278,6 +284,110 @@ class ClosureTest(unittest.TestCase):
             with self.assertRaises(c.ClosureError):
                 c.write_output(Path(tmp) / 'large', {'value': 'x' * 100}, limit=10)
             self.assertFalse((Path(tmp) / 'large').exists())
+
+    def test_diagnostics_redact_exception_and_bound_exit_code(self):
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('solver', 'runtime'):
+                raise c.reference.ProbeExit(7)
+        self.assertEqual(c.diagnostic_message(caught.exception),
+                         'closure failure stage=solver kind=runtime category=command_exit code=7 cleanup=not_attempted')
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('install', 'build'):
+                raise ValueError('private URL or path')
+        message = c.diagnostic_message(caught.exception)
+        self.assertEqual(message, 'closure failure stage=install kind=build category=invalid_data cleanup=not_attempted')
+        self.assertNotIn('private', message)
+        with self.assertRaises(ValueError):
+            with c.stage('private path', 'build'):
+                pass
+
+    def test_all_stages_and_categories_redact_payloads(self):
+        samples = [(c.ClosureError('secret'), 'closure_error'),
+                   (TimeoutError('secret'), 'timeout'),
+                   (c.reference.CommandError('secret'), 'command_error'),
+                   (OSError('secret'), 'io_error'), (RuntimeError('secret'), 'other')]
+        for where in c.STAGES:
+            for error, category in samples:
+                with self.subTest(where=where, category=category), self.assertRaises(c.DiagnosticError) as caught:
+                    with c.stage(where, 'build'):
+                        raise error
+                message = c.diagnostic_message(caught.exception)
+                self.assertEqual(message, f'closure failure stage={where} kind=build category={category} cleanup=not_attempted')
+        with self.assertRaises(ValueError):
+            c.DiagnosticError('input', 'none', 'leak', cleanup='not_attempted')
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('solver'):
+                raise c.reference.ProbeExit(99999)
+        self.assertNotIn('code=', c.diagnostic_message(caught.exception))
+
+    def test_diagnostic_cleanup_preserves_primary_cause(self):
+        original = ValueError('secret')
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('install', 'build'):
+                try:
+                    raise original
+                finally:
+                    with c.cleanup_stage():
+                        raise OSError('secret cleanup')
+        self.assertIs(caught.exception.__cause__, original)
+        self.assertEqual(c.diagnostic_message(caught.exception),
+                         'closure failure stage=install kind=build category=invalid_data cleanup=failed')
+
+    def test_discovery_wrapped_type_redaction(self):
+        for cause, category in [(TimeoutError('secret'), 'timeout'), (ValueError('secret'), 'invalid_data')]:
+            with self.subTest(category=category), self.assertRaises(c.DiagnosticError) as caught:
+                with c.stage('auth_index', 'build'):
+                    with c.discovery.stage('inrelease-main'):
+                        raise cause
+            self.assertEqual(c.diagnostic_message(caught.exception),
+                             f'closure failure stage=auth_index kind=build category={category} cleanup=not_attempted')
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('auth_index', 'build'):
+                error = c.discovery.DiscoveryError('private')
+                error.category = 'secret'; error.stage = 'private'
+                raise error
+        self.assertEqual(c.diagnostic_message(caught.exception),
+                         'closure failure stage=auth_index kind=build category=other cleanup=not_attempted')
+        first = c.discovery.DiscoveryError('private')
+        second = c.discovery.DiscoveryError('private')
+        first.__context__ = second
+        second.__context__ = first
+        self.assertEqual(c.classify(first), ('other', None))
+
+    def test_auth_and_keyring_stages_are_not_misidentified(self):
+        for needle, expected in [('/usr/share/keyrings/', 'keyring'), ('__auth__', 'auth_index')]:
+            calls = []
+            def runner(args, **kwargs):
+                calls.append(args)
+                if args[1:3] == ['image', 'inspect']:
+                    return json.dumps([{'Id': 'sha256:' + 'a' * 64, 'Os': 'linux',
+                        'Architecture': 'amd64', 'Config': {'Volumes': None}, 'RepoDigests': [c.BASE_IMAGE]}]).encode()
+                if args[1] == 'exec':
+                    return b'ii \texample\t1\tamd64\n'
+                if args[1] == 'cp' and needle in args[2]:
+                    raise c.reference.ProbeExit(1)
+                return b''
+            document = {'platform': 'linux/amd64', 'base': {'manifest': c.discovery.BASE,
+                        'config': 'sha256:' + 'a' * 64}}
+            auth = mock.Mock(side_effect=c.ClosureError('secret'))
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(c, 'authenticated_indexes', auth), \
+                    self.assertRaises(c.DiagnosticError) as caught:
+                c.collect(document, Path(tmp), runner)
+            self.assertEqual(caught.exception.where, expected)
+            self.assertEqual(caught.exception.kind, 'build')
+            self.assertEqual(caught.exception.cleanup, 'succeeded')
+
+    def test_staged_error_keeps_original_cause_when_cleanup_fails(self):
+        original = ValueError('secret')
+        with self.assertRaises(c.DiagnosticError) as caught:
+            try:
+                with c.stage('install', 'build'):
+                    raise original
+            finally:
+                with c.cleanup_stage('build'):
+                    raise OSError('secret cleanup')
+        self.assertIs(caught.exception.__cause__, original)
+        self.assertEqual(caught.exception.cleanup, 'failed')
 
     def test_published_output_reports_temp_cleanup_failure(self):
         with tempfile.TemporaryDirectory() as tmp:

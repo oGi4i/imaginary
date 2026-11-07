@@ -38,6 +38,98 @@ class PublishedCleanupError(ClosureError):
     pass
 
 
+STAGES = frozenset(('input', 'setup', 'base_pull', 'base_inspect', 'create', 'start', 'base_inventory',
+                    'keyring', 'auth_index', 'mirror', 'configure', 'pre_inventory', 'solver',
+                    'download', 'install', 'check', 'post', 'graph', 'cleanup', 'publish'))
+KINDS = frozenset(('none', 'build', 'runtime'))
+CATEGORIES = frozenset(('published_cleanup', 'command_exit', 'command_error', 'timeout',
+                        'closure_error', 'invalid_data', 'io_error', 'other'))
+CLEANUP_STATES = frozenset(('not_attempted', 'succeeded', 'failed'))
+
+
+class DiagnosticError(Exception):
+    def __init__(self, where, kind, category, code=None, cleanup='not_attempted'):
+        if (where not in STAGES or kind not in KINDS or category not in CATEGORIES
+                or cleanup not in CLEANUP_STATES or (code is not None and
+                (category != 'command_exit' or type(code) is not int or not 1 <= code <= 255))):
+            raise ValueError('invalid diagnostic')
+        super().__init__('closure operation failed')
+        self.where, self.kind, self.category, self.code, self.cleanup = where, kind, category, code, cleanup
+
+
+def classify(exc):
+    if type(exc) is discovery.DiscoveryError:
+        # discovery.stage suppresses but retains the original exception context.
+        context = exc.__context__
+        if isinstance(context, TimeoutError):
+            return 'timeout', None
+        if isinstance(context, (ValueError, KeyError, TypeError)):
+            return 'invalid_data', None
+        if isinstance(context, OSError):
+            return 'io_error', None
+        return 'other', None
+    if isinstance(exc, PublishedCleanupError):
+        return 'published_cleanup', None
+    if isinstance(exc, reference.ProbeExit):
+        return 'command_exit', exc.code if isinstance(exc.code, int) and 1 <= exc.code <= 255 else None
+    if isinstance(exc, reference.CommandError):
+        return 'command_error', None
+    if isinstance(exc, TimeoutError):
+        return 'timeout', None
+    if isinstance(exc, ClosureError):
+        return 'closure_error', None
+    if isinstance(exc, (ValueError, KeyError, TypeError)):
+        return 'invalid_data', None
+    if isinstance(exc, OSError):
+        return 'io_error', None
+    return 'other', None
+
+
+def diagnostic_message(exc):
+    message = f'closure failure stage={exc.where} kind={exc.kind} category={exc.category}'
+    if exc.code is not None:
+        message += f' code={exc.code}'
+    return message + f' cleanup={exc.cleanup}'
+
+
+@contextmanager
+def stage(where, kind='none'):
+    if where not in STAGES or kind not in KINDS:
+        raise ValueError('invalid diagnostic stage')
+    try:
+        yield
+    except DiagnosticError:
+        raise
+    except Exception as exc:
+        category, code = classify(exc)
+        cleanup = 'failed' if getattr(exc, '_closure_cleanup_failed', False) else 'not_attempted'
+        raise DiagnosticError(where, kind, category, code, cleanup) from exc
+
+
+@contextmanager
+def cleanup_stage(kind='none'):
+    if kind not in KINDS:
+        raise ValueError('invalid diagnostic kind')
+    original = sys.exception()
+    try:
+        yield
+    except Exception as cleanup:
+        if original is not None:
+            if isinstance(original, DiagnosticError):
+                original.cleanup = 'failed'
+                original.add_note('container cleanup failed')
+                original.__context__ = cleanup
+                raise original
+            original.add_note('container cleanup failed')
+            original._closure_cleanup_failed = True
+            raise original from cleanup
+        category, code = classify(cleanup)
+        raise DiagnosticError('cleanup', kind, category, code, 'failed') from cleanup
+    else:
+        if isinstance(original, DiagnosticError):
+            original.cleanup = 'succeeded'
+
+
 ROOTS = {
     'build': ('ca-certificates', 'automake', 'build-essential', 'curl',
               'gobject-introspection', 'gtk-doc-tools', 'libglib2.0-dev', 'libjpeg62-turbo-dev',
@@ -431,59 +523,77 @@ def image_identity(data, document):
 
 
 def collect(document, temp, run):
-    run(['docker', 'pull', '--platform=linux/amd64', BASE_IMAGE], timeout=300)
-    image = image_identity(run(['docker', 'image', 'inspect', BASE_IMAGE], timeout=30), document)
+    with stage('base_pull'):
+        run(['docker', 'pull', '--platform=linux/amd64', BASE_IMAGE], timeout=300)
+    with stage('base_inspect'):
+        image = image_identity(run(['docker', 'image', 'inspect', BASE_IMAGE], timeout=30), document)
     results = {}
     base_common = None
     for kind, roots in ROOTS.items():
         name = 'runtime-closure-' + uuid.uuid4().hex
-        mirror = temp / ('mirror-' + kind)
-        mirror.mkdir()
+        with stage('mirror', kind):
+            mirror = temp / ('mirror-' + kind)
+            mirror.mkdir()
         try:
-            run(['docker', 'create', '--name', name, '--platform=linux/amd64', '--network=none',
-                 '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
-                 '--memory=4g', '--cpus=2', '--pull=never', '--entrypoint=/bin/sh', image,
-                 '-c', 'while :; do sleep 60; done'], timeout=30)
-            run(['docker', 'start', name], timeout=30)
-            base = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
-            if base_common is not None and base != base_common:
-                raise ClosureError('base drift between roots')
-            base_common = base
-            keypath = temp / ('key-' + kind)
-            keypath.mkdir()
-            run(['docker', 'cp', name + ':/usr/share/keyrings/debian-archive-keyring.gpg',
-                 str(keypath / 'keyring.gpg')], timeout=30)
-            indexes = authenticated_indexes(document, keypath / 'keyring.gpg')
-            match_installed(base, indexes)
-            write_mirror(mirror, document['snapshot'])
-            run(['docker', 'cp', str(mirror), name + ':/mirror'], timeout=60)
-            run(['docker', 'exec', name, '/bin/sh', '-c', CONFIGURE], timeout=180)
-            pre = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
-            if pre != base:
-                raise ClosureError('pre-install inventory changed')
-            simulation = SIMULATE + ' '.join(roots)
-            plan_data = run(['docker', 'exec', name, '/bin/sh', '-c', simulation], timeout=120)
-            plan = parse_solver(plan_data)
-            selected = match_installed(plan, indexes) if plan else []
-            download_payloads(selected, mirror)
-            run(['docker', 'exec', name, '/bin/sh', '-c', 'chmod 755 /var/cache/apt/archives'], timeout=30)
-            copy_archives(selected, mirror, name, run)
-            install = ('DEBIAN_FRONTEND=noninteractive apt-get ' + APT_OPTIONS
-                       + ' --no-download --no-install-recommends -y install ' + ' '.join(roots))
-            run(['docker', 'exec', name, '/bin/sh', '-c', install], timeout=600)
-            run(['docker', 'exec', name, '/bin/sh', '-c', 'apt-get ' + APT_OPTIONS + ' check'], timeout=120)
-            post = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
-            final = reconcile(base, plan, post, indexes)
-            # Download and hash all post-install packages, including base packages.
-            download_payloads(final, mirror)
-            edges = resolve_edges(final, lambda left, op, right: compare_version(run, name, left, op, right))
-            for row in final:
-                row.pop('download_path', None)
-            results[kind] = {'roots': list(roots), 'base': base, 'pre': pre, 'post': post,
-                             'solver': plan_data.decode('ascii'), 'packages': final,
-                             'dependency_edges': edges}
+            with stage('create', kind):
+                run(['docker', 'create', '--name', name, '--platform=linux/amd64', '--network=none',
+                     '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
+                     '--memory=4g', '--cpus=2', '--pull=never', '--entrypoint=/bin/sh', image,
+                     '-c', 'while :; do sleep 60; done'], timeout=30)
+            with stage('start', kind):
+                run(['docker', 'start', name], timeout=30)
+            with stage('base_inventory', kind):
+                base = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
+                if base_common is not None and base != base_common:
+                    raise ClosureError('base drift between roots')
+                base_common = base
+            with stage('keyring', kind):
+                keypath = temp / ('key-' + kind)
+                keypath.mkdir()
+                run(['docker', 'cp', name + ':/usr/share/keyrings/debian-archive-keyring.gpg',
+                     str(keypath / 'keyring.gpg')], timeout=30)
+            with stage('auth_index', kind):
+                indexes = authenticated_indexes(document, keypath / 'keyring.gpg')
+                match_installed(base, indexes)
+            with stage('mirror', kind):
+                write_mirror(mirror, document['snapshot'])
+                run(['docker', 'cp', str(mirror), name + ':/mirror'], timeout=60)
+            with stage('configure', kind):
+                run(['docker', 'exec', name, '/bin/sh', '-c', CONFIGURE], timeout=180)
+            with stage('pre_inventory', kind):
+                pre = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
+                if pre != base:
+                    raise ClosureError('pre-install inventory changed')
+            with stage('solver', kind):
+                simulation = SIMULATE + ' '.join(roots)
+                plan_data = run(['docker', 'exec', name, '/bin/sh', '-c', simulation], timeout=120)
+                plan = parse_solver(plan_data)
+                selected = match_installed(plan, indexes) if plan else []
+            with stage('download', kind):
+                download_payloads(selected, mirror)
+                run(['docker', 'exec', name, '/bin/sh', '-c', 'chmod 755 /var/cache/apt/archives'], timeout=30)
+                copy_archives(selected, mirror, name, run)
+            with stage('install', kind):
+                install = ('DEBIAN_FRONTEND=noninteractive apt-get ' + APT_OPTIONS
+                           + ' --no-download --no-install-recommends -y install ' + ' '.join(roots))
+                run(['docker', 'exec', name, '/bin/sh', '-c', install], timeout=600)
+            with stage('check', kind):
+                run(['docker', 'exec', name, '/bin/sh', '-c', 'apt-get ' + APT_OPTIONS + ' check'], timeout=120)
+            with stage('post', kind):
+                post = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
+                final = reconcile(base, plan, post, indexes)
+            with stage('download', kind):
+                download_payloads(final, mirror)
+            with stage('graph', kind):
+                edges = resolve_edges(final, lambda left, op, right: compare_version(run, name, left, op, right))
+                for row in final:
+                    row.pop('download_path', None)
+                results[kind] = {'roots': list(roots), 'base': base, 'pre': pre, 'post': post,
+                                 'solver': plan_data.decode('ascii'), 'packages': final,
+                                 'dependency_edges': edges}
         finally:
-            run(['docker', 'rm', '-f', name], timeout=30)
+            with cleanup_stage(kind):
+                run(['docker', 'rm', '-f', name], timeout=30)
     return {'schema_version': 1, 'platform': 'linux/amd64', 'base_manifest': discovery.BASE,
             'closures': results, 'limitations': ['Base provenance does not prove installed deb bytes.',
                                                   'Unreviewed discovery is not a reproducible image.']}
@@ -528,10 +638,11 @@ def main():
     parser.add_argument('--discoveryJSON', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
-    require_ci()
-    if args.output.exists() or args.output.is_symlink():
-        raise ClosureError('output already exists')
-    document = read_discovery(args.discoveryJSON)
+    with stage('input'):
+        require_ci()
+        if args.output.exists() or args.output.is_symlink():
+            raise ClosureError('output already exists')
+        document = read_discovery(args.discoveryJSON)
     with tempfile.TemporaryDirectory(prefix='runtime-closure-') as tmp:
         root = Path(tmp)
         config = root / 'docker-config'
@@ -563,15 +674,18 @@ def main():
         finally:
             signal.setitimer(signal.ITIMER_REAL, *previous_timer)
             signal.signal(signal.SIGALRM, previous_handler)
-        write_output(args.output, result)
+        with stage('publish'):
+            write_output(args.output, result)
 
 
 if __name__ == '__main__':
     try:
         main()
-    except PublishedCleanupError:
-        print('evidence published; temporary cleanup failed', file=sys.stderr)
+    except DiagnosticError as exc:
+        print(diagnostic_message(exc), file=sys.stderr)
+        if exc.category == 'published_cleanup':
+            print('evidence published; temporary cleanup failed', file=sys.stderr)
         sys.exit(1)
     except Exception:
-        print('package closure failed; no evidence produced', file=sys.stderr)
+        print('closure failure stage=setup kind=none category=other cleanup=not_attempted', file=sys.stderr)
         sys.exit(1)
