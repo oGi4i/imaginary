@@ -23,6 +23,37 @@ const incompleteLock = `{
   "features": null
 }`
 
+func TestRunJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lock")
+	if err := os.WriteFile(path, []byte(incompleteLock), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if code := run([]string{"--json", path}, &out, &stderr); code != 1 {
+		t.Fatalf("code=%d", code)
+	}
+	if !strings.HasPrefix(out.String(), `{"valid":true,"unresolved":[`) || !strings.Contains(out.String(), `"features"`) || stderr.Len() != 0 {
+		t.Fatalf("out=%q err=%q", out.String(), stderr.String())
+	}
+	out.Reset()
+	stderr.Reset()
+	if err := os.WriteFile(path, []byte(`{"secret":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"--json", path}, &out, &stderr); code != 1 || out.String() != "{\"valid\":false,\"unresolved\":[]}\n" {
+		t.Fatalf("code=%d out=%q", code, out.String())
+	}
+	if strings.Contains(out.String()+stderr.String(), "secret") {
+		t.Fatal("reflected private input")
+	}
+	out.Reset()
+	stderr.Reset()
+	if code := run([]string{"--json", filepath.Join(dir, "secret")}, &out, &stderr); code != 1 || out.String() != "{\"valid\":false,\"unresolved\":[]}\n" || strings.Contains(stderr.String(), "secret") {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), stderr.String())
+	}
+}
+
 func TestRunListsUnresolvedLocks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lock.yaml")
 	if err := os.WriteFile(path, []byte(incompleteLock), 0600); err != nil {
