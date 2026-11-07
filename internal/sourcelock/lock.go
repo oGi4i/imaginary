@@ -640,7 +640,7 @@ func stringArray(v interface{}, path string) error {
 }
 
 func validateV2Tools(v interface{}) error {
-	m, err := object(v, "build_tools", "buildkit_image", "frontend_image", "buildx", "actions")
+	m, err := object(v, "build_tools", "buildkit_image", "frontend_image", "buildx", "syft", "actions")
 	if err != nil {
 		return err
 	}
@@ -649,8 +649,10 @@ func validateV2Tools(v interface{}) error {
 			return err
 		}
 	}
-	if err = validateArtifact(m["buildx"], "build_tools.buildx"); err != nil {
-		return err
+	for _, k := range []string{"buildx", "syft"} {
+		if err = validateArtifact(m[k], "build_tools."+k); err != nil {
+			return err
+		}
 	}
 	actions, err := array(m["actions"], "build_tools.actions")
 	if err != nil {

@@ -24,18 +24,29 @@
   },
   "build_packages": null,
   "runtime_packages": null,
-  "build_roots": null,
-  "runtime_roots": null,
+  "build_roots": ["ca-certificates", "automake", "build-essential", "curl", "gobject-introspection", "gtk-doc-tools", "libglib2.0-dev", "libjpeg62-turbo-dev", "libpng-dev", "libwebp-dev", "libtiff5-dev", "libgif-dev", "libexif-dev", "libxml2-dev", "libpoppler-glib-dev", "swig", "libmagickwand-dev", "libpango1.0-dev", "libmatio-dev", "libopenslide-dev", "libcfitsio-dev", "libgsf-1-dev", "fftw3-dev", "liborc-0.4-dev", "librsvg2-dev", "libimagequant-dev", "libheif-dev"],
+  "runtime_roots": ["procps", "libglib2.0-0", "libjpeg62-turbo", "libpng16-16", "libopenexr23", "libwebp6", "libwebpmux3", "libwebpdemux2", "libtiff5", "libgif7", "libexif12", "libxml2", "libpoppler-glib8", "libmagickwand-6.q16-6", "libpango1.0-0", "libmatio4", "libopenslide0", "libgsf-1-114", "fftw3", "liborc-0.4-0", "librsvg2-2", "libcfitsio7", "libimagequant0", "libheif1"],
   "go_toolchain": {"version": "1.20.14", "url": "https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz", "size": 100448992, "sha256": "ff445e48af27f93f66bd949ae060d97991c83e11289009d311f25426258f9c44"},
   "build_tools": {
     "buildkit_image": "docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75",
     "frontend_image": "docker.io/docker/dockerfile@sha256:dc9e236567481e0aca4c1f52351af213b9a176622f10e3f4a86e5cc48919fa01",
     "buildx": {"url": "https://github.com/docker/buildx/releases/download/v0.21.2/buildx-v0.21.2.linux-amd64", "size": 67010712, "sha256": "b13bee81c3db12a4be7d0b9d042b64d0dd9ed116f7674dfac0ffdf2a71acfe3d"},
+    "syft": {"url": "https://github.com/anchore/syft/releases/download/v1.20.0/syft_1.20.0_linux_amd64.tar.gz", "size": 17966142, "sha256": "689e12c5cbf67521ce61b9c126068f9eaabe1223e77971b2fede50033ff6b5cc"},
     "actions": [
       {"name": "checkout", "repository": "https://github.com/actions/checkout", "commit": "11bd71901bbe5b1630ceea73d27597364c9af683"},
-      {"name": "upload-artifact", "repository": "https://github.com/actions/upload-artifact", "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02"}
+      {"name": "upload-artifact", "repository": "https://github.com/actions/upload-artifact", "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02"},
+      {"name": "download-artifact", "repository": "https://github.com/actions/download-artifact", "commit": "d3f86a106a0bac45b974a628896c90dbdf5c8093"}
     ]
   },
-  "build": null,
+  "build": {
+    "go_mod_sha256": "deda953d33ab08da80c16543970ed5c67501c765be424f64944f4d0131d10fdb",
+    "go_sum_sha256": "1d27b52d239415eeb623c24f550ce699113185cd0d9f9e5361a6a5f0b4a066eb",
+    "source_date_epoch": 1597233394,
+    "configure": ["--disable-debug", "--disable-dependency-tracking", "--disable-introspection", "--disable-static", "--enable-gtk-doc-html=no", "--enable-gtk-doc=no", "--enable-pyvips8=no"],
+    "cflags": ["-g", "-O3"],
+    "cxxflags": ["-D_GLIBCXX_USE_CXX11_ABI=0", "-g", "-O3"],
+    "go_flags": ["-trimpath"],
+    "module_mode": "readonly"
+  },
   "features": null
 }

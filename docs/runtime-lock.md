@@ -42,7 +42,7 @@ Schema 2 fields:
   already present in the pinned image; it does not replace archive verification.
 - `go_toolchain`: `version`, `url`, `size`, `sha256`.
 - `build_tools`: digest-pinned `buildkit_image` and `frontend_image`, `buildx`
-  artifact (`url`, `size`, `sha256`), and nonempty `actions` entries with `name`,
+  and `syft` artifacts (each with `url`, `size`, `sha256`), and nonempty `actions` entries with `name`,
   HTTPS `repository`, and full lowercase 40-hex `commit`.
 - `build`: `go_mod_sha256`, `go_sum_sha256`, positive `source_date_epoch`, arrays
   `configure`, `cflags`, `cxxflags`, `go_flags`, and `module_mode: "readonly"`.
@@ -56,8 +56,11 @@ The stored base digest, Go payload and signed snapshot index identities came
 from discovery artifact 13573423316. The InRelease sizes came from official
 snapshot downloads whose hashes match that artifact. Discovery artifact
 13574856370 records the keyring size and hash. Tool identities come from public
-image and release metadata. The buildx payload bytes have not yet been downloaded
-and checked against the published checksum, and the binary has not been executed
-in the approved CI build environment. These are separate pending checks.
-Package closures, roots, build settings and features remain unresolved. Discovery
-evidence is not itself a package closure or qualification.
+image and release metadata. The buildx and Syft payload bytes have not yet been
+downloaded and checked against their published checksums, and the tools have not
+been executed in the approved CI build environment. These are separate pending
+checks.
+Package roots and build flags record the recipe intent, not a resolved closure.
+The module hashes identify the tracked files, and `source_date_epoch` is the
+upstream baseline commit timestamp. Package closures and features remain
+unresolved. Discovery evidence is not itself a package closure or qualification.
