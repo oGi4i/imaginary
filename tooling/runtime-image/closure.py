@@ -43,6 +43,18 @@ AUTH_REASONS = frozenset(('mismatched_snapshot', 'unexpected_index_identity',
                           'base_invalid'))
 
 
+GRAPH_REASONS = frozenset(('invalid_relation', 'missing_provider', 'ambiguous_provider',
+                           'invalid_package', 'version_compare'))
+
+
+class GraphError(ClosureError):
+    def __init__(self, reason):
+        if reason not in GRAPH_REASONS:
+            raise ValueError('invalid graph diagnostic')
+        super().__init__('dependency graph rejected')
+        self.reason = reason
+
+
 APT_REASONS = frozenset(('missing_key', 'invalid_signature', 'missing_release', 'not_found',
                          'compression', 'permission', 'unsupported_method', 'unknown'))
 
@@ -100,7 +112,8 @@ class DiagnosticError(Exception):
                 (category != 'command_exit' or type(code) is not int or not 1 <= code <= 255))
                 or (reason is not None and (category != 'closure_error' or not (
                     where == 'auth_index' and reason in AUTH_REASONS
-                    or where == 'configure' and reason in APT_REASONS)))):
+                    or where == 'configure' and reason in APT_REASONS
+                    or where == 'graph' and reason in GRAPH_REASONS)))):
             raise ValueError('invalid diagnostic')
         super().__init__('closure operation failed')
         self.where, self.kind, self.category, self.code, self.cleanup = where, kind, category, code, cleanup
@@ -164,6 +177,8 @@ def stage(where, kind='none'):
         if where == 'auth_index' and type(exc) is AuthIndexError and exc.reason in AUTH_REASONS:
             reason = exc.reason
         if where == 'configure' and type(exc) is AptConfigureError and exc.reason in APT_REASONS:
+            reason = exc.reason
+        if where == 'graph' and type(exc) is GraphError and exc.reason in GRAPH_REASONS:
             reason = exc.reason
         errors = exc.errors if where == 'configure' and type(exc) is AptConfigureError else ()
         raise DiagnosticError(where, kind, category, code, cleanup, reason, errors) from exc
@@ -440,13 +455,13 @@ def relations(package):
             for term in group.split('|'):
                 match = re.fullmatch(r'\s*([a-z0-9][a-z0-9+.-]*(?::(?:any|native|amd64))?)(?:\s*\((<<|<=|=|>=|>>)\s*([A-Za-z0-9.+:~_-]{1,200})\))?\s*', term)
                 if not match or (field == 'Provides' and match[2] not in (None, '=')):
-                    raise ClosureError('invalid dependency relation')
+                    raise GraphError('invalid_relation')
                 item = {'name': match[1]}
                 if match[2]:
                     item.update(operator=match[2], version=match[3])
                 alternatives.append(item)
             if field == 'Provides' and len(alternatives) != 1:
-                raise ClosureError('invalid Provides alternatives')
+                raise GraphError('invalid_relation')
             groups.append(alternatives)
         result[field] = groups
     return result
@@ -457,12 +472,15 @@ def resolve_edges(rows, compare):
     packages = [row['package'] for row in rows]
     providers = {}
     for package in packages:
-        _validate_package(package)
+        try:
+            _validate_package(package)
+        except ClosureError as exc:
+            raise GraphError('invalid_package') from exc
         entries = [(package['Package'], package['Version'])]
         for group in relations(package).get('Provides', []):
             entry = group[0]
             if ':' in entry['name']:
-                raise ClosureError('qualified Provides unsupported')
+                raise GraphError('invalid_relation')
             entries.append((entry['name'], entry.get('version')))
         for name, version in entries:
             providers.setdefault(name, []).append((package, version))
@@ -476,7 +494,7 @@ def resolve_edges(rows, compare):
                 for alternative in group:
                     name, _, qualifier = alternative['name'].partition(':')
                     for candidate, version in providers.get(name, []):
-                        if qualifier == 'any' and candidate.get('Multi-Arch') not in ('allowed', 'foreign'):
+                        if qualifier == 'any' and candidate.get('Multi-Arch') != 'allowed':
                             continue
                         if qualifier in ('native', 'amd64') and candidate['Architecture'] not in ('amd64', 'all'):
                             continue
@@ -484,8 +502,10 @@ def resolve_edges(rows, compare):
                                 version, alternative['operator'], alternative['version'])):
                             continue
                         candidates.append((candidate, name, version, alternative))
+                if not candidates:
+                    raise GraphError('missing_provider')
                 if len(candidates) != 1:
-                    raise ClosureError('dependency missing or ambiguous')
+                    raise GraphError('ambiguous_provider')
                 candidate, name, version, choice = candidates[0]
                 edges.append({'source': {'name': package['Package'], 'version': package['Version'],
                                          'architecture': package['Architecture']},
@@ -500,14 +520,14 @@ def compare_version(run, container, left, operator, right):
     if (not re.fullmatch(r'[A-Za-z0-9.+:~_-]{1,200}', left)
             or not re.fullmatch(r'[A-Za-z0-9.+:~_-]{1,200}', right)
             or operator not in ('<<', '<=', '=', '>=', '>>')):
-        raise ClosureError('invalid version comparison')
+        raise GraphError('version_compare')
     try:
         run(['docker', 'exec', container, 'dpkg', '--compare-versions', left, operator, right], timeout=30)
         return True
     except reference.ProbeExit as exc:
         if exc.code == 1:
             return False
-        raise ClosureError('dpkg version comparison failed') from exc
+        raise GraphError('version_compare') from exc
 
 
 def reconcile(base, selected, post, indexes):

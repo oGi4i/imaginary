@@ -590,6 +590,23 @@ class ClosureTest(unittest.TestCase):
         with self.assertRaises(c.ClosureError):
             c.resolve_edges(rows, lambda *args: False)
 
+    def test_graph_reasons_are_fixed_and_do_not_expose_package_data(self):
+        source = record('source')
+        source.pop('Provides')
+        source['Depends'] = 'missing'
+        foo = record('foo'); foo.pop('Depends'); foo.pop('Provides')
+        bar = record('bar'); bar.pop('Depends'); bar.pop('Provides')
+        malformed = dict(source, Depends='bad ()')
+        ambiguous = dict(source, Depends='foo | bar')
+        for rows, reason in [([{'package': malformed}], 'invalid_relation'),
+                             ([{'package': source}], 'missing_provider'),
+                             ([{'package': ambiguous}, {'package': foo}, {'package': bar}], 'ambiguous_provider')]:
+            with self.subTest(reason=reason), self.assertRaises(c.DiagnosticError) as caught:
+                with c.stage('graph', 'build'):
+                    c.resolve_edges(rows, lambda *args: True)
+            self.assertEqual(c.diagnostic_message(caught.exception),
+                             f'closure failure stage=graph kind=build category=closure_error reason={reason} cleanup=not_attempted')
+
     def test_dpkg_compare_uses_argument_array_and_checks_exit(self):
         runner = mock.Mock(return_value=b'')
         self.assertTrue(c.compare_version(runner, 'owned', '1:2~rc1', '>=', '1:2'))
@@ -618,6 +635,29 @@ class ClosureTest(unittest.TestCase):
         provider['Provides'] = 'virtual (= 2)'; provider['Multi-Arch'] = 'no'
         with self.assertRaises(c.ClosureError):
             c.resolve_edges([{'package': source}, {'package': provider}], cmp)
+
+    def test_arch_any_requires_allowed_not_foreign(self):
+        source = record('source'); source.pop('Provides')
+        provider = record('foo'); provider.pop('Depends'); provider.pop('Provides')
+        source['Depends'] = 'foo:any'
+        for multiarch, accepted in [('allowed', True), ('foreign', False), ('no', False), (None, False)]:
+            if multiarch is None:
+                provider.pop('Multi-Arch', None)
+            else:
+                provider['Multi-Arch'] = multiarch
+            with self.subTest(multiarch=multiarch):
+                if accepted:
+                    self.assertEqual(c.resolve_edges([{'package': source}, {'package': provider}],
+                                                     lambda *args: True)[0]['provider']['name'], 'foo')
+                else:
+                    with self.assertRaises(c.GraphError) as failure:
+                        c.resolve_edges([{'package': source}, {'package': provider}], lambda *args: True)
+                    self.assertEqual(failure.exception.reason, 'missing_provider')
+        provider['Multi-Arch'] = 'foreign'
+        for dependency in ('foo', 'foo:native', 'foo:amd64'):
+            source['Depends'] = dependency
+            self.assertEqual(c.resolve_edges([{'package': source}, {'package': provider}],
+                                             lambda *args: True)[0]['provider']['name'], 'foo')
 
     def test_decompression_and_duplicate_fields_are_bounded(self):
         blob = lzma.compress(b'Package: a\nPackage: b\n\n')
