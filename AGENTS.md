@@ -43,7 +43,10 @@ a discovery artifact is not a locked or reproducible candidate image. The separa
 reference-inventory job uses fixed read-only probes in the pinned public image;
 see `docs/reference-inventory.md`. Missing native/ELF tools yield incomplete
 evidence, not feature equivalence. Fatal supervision/identity/cleanup errors must
-not be downgraded to optional missing tools.
+not be downgraded to optional missing tools. The closure helper resolves separate
+build/runtime package states in network-disabled CI containers from verified
+snapshot metadata and package payloads. Local tests mock container commands;
+actual closure evidence requires CI success and is not image reproducibility.
 
 ## Verification and limits
 

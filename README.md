@@ -57,7 +57,9 @@ incomplete preparation for authenticated inputs and reference inventory. It does
 not produce a candidate image or establish reproducibility. Its independent
 [published-reference inventory](docs/reference-inventory.md) job records only
 available parsed package/native observations; missing tools leave evidence
-incomplete.
+incomplete. Its closure step resolves separate build/runtime package inventories
+using verified metadata and payloads in network-disabled CI containers. Until
+that step succeeds, no complete package closure is recorded.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image

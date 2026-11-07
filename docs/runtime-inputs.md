@@ -40,11 +40,17 @@ only if the verification step writes the JSON. The Go entry records
 verification does not mean that any Debian package payload has been downloaded
 or authenticated.
 
-Still required are both full APT package closures, including the base-installed
-packages, exact dependency relations, versions, architectures, checksums and
-URLs, and the public reference image's package, ELF and libvips loader
-inventory. These require separate integration before discovery can be called
-complete. Do not turn missing results into empty lists or update the lock from
-unreviewed metadata. An independent review and actual CI evidence are required
-before using the result. No local native execution, image publication, or
-cluster action is part of this workflow.
+After the metadata artifact, the discovery job runs the closure helper against
+that verified JSON. The helper independently authenticates the indexes and
+resolves build and runtime transactions from the same pinned Debian base,
+including base-installed packages. If it succeeds, the separate
+`runtime-input-closure` artifact contains `closure.json` and expires after seven
+days. If the helper fails, the workflow cannot upload closure evidence that
+was not written. A reviewed CI run is required to establish whether resolution
+actually succeeds; code or mocked tests alone do not establish a closure.
+
+The separate reference job inventories the public reference image. Reference
+features and candidate images remain unqualified, and the discovery job ends
+with an intentional failure. Do not turn missing results into empty lists or
+update the lock from unreviewed evidence. No local native execution, image
+publication, or cluster action is part of this workflow.

@@ -1,0 +1,577 @@
+#!/usr/bin/env python3
+"""Fail-closed helpers for matching installed packages to authenticated indexes.
+
+The caller must authenticate index metadata before using these functions. This
+module is experimental; actual CI and independent review are required before
+its output can be used as lock evidence.
+"""
+import argparse
+import importlib.util
+import json
+import lzma
+import os
+import signal
+import sys
+import tempfile
+import time
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
+import re
+
+
+_spec = importlib.util.spec_from_file_location('runtime_image_discovery',
+                                               Path(__file__).with_name('discovery.py'))
+discovery = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(discovery)
+_spec = importlib.util.spec_from_file_location('runtime_image_reference',
+                                               Path(__file__).with_name('reference_inventory.py'))
+reference = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(reference)
+
+
+class ClosureError(ValueError):
+    pass
+
+
+class PublishedCleanupError(ClosureError):
+    pass
+
+
+ROOTS = {
+    'build': ('ca-certificates', 'automake', 'build-essential', 'curl',
+              'gobject-introspection', 'gtk-doc-tools', 'libglib2.0-dev', 'libjpeg62-turbo-dev',
+              'libpng-dev', 'libwebp-dev', 'libtiff5-dev', 'libgif-dev', 'libexif-dev',
+              'libxml2-dev', 'libpoppler-glib-dev', 'swig', 'libmagickwand-dev',
+              'libpango1.0-dev', 'libmatio-dev', 'libopenslide-dev', 'libcfitsio-dev',
+              'libgsf-1-dev', 'fftw3-dev', 'liborc-0.4-dev', 'librsvg2-dev',
+              'libimagequant-dev', 'libheif-dev'),
+    'runtime': ('procps', 'libglib2.0-0', 'libjpeg62-turbo', 'libpng16-16', 'libopenexr23',
+                'libwebp6', 'libwebpmux3', 'libwebpdemux2', 'libtiff5', 'libgif7', 'libexif12',
+                'libxml2', 'libpoppler-glib8', 'libmagickwand-6.q16-6', 'libpango1.0-0',
+                'libmatio4', 'libopenslide0', 'libgsf-1-114', 'fftw3', 'liborc-0.4-0',
+                'librsvg2-2', 'libcfitsio7', 'libimagequant0', 'libheif1')}
+
+FIELDS = {name.lower(): name for name in (
+    'Package', 'Version', 'Architecture', 'Filename', 'Size', 'SHA256',
+    'Depends', 'Pre-Depends', 'Provides', 'Conflicts', 'Breaks', 'Replaces',
+    'Recommends', 'Suggests', 'Enhances', 'Multi-Arch')}
+
+
+ARCHIVES = {'main': ('debian', 'buster'), 'security': ('debian-security', 'buster/updates')}
+
+
+def archive_root(name):
+    return 'https://snapshot.debian.org/archive/' + ARCHIVES[name][0] + '/20240408T000000Z/'
+
+
+@contextmanager
+def deadline(seconds):
+    def expired(signum, frame):
+        raise TimeoutError('overall deadline exceeded')
+    started = time.monotonic()
+    old_handler = signal.signal(signal.SIGALRM, expired)
+    old_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        remaining = max(0.001, old_timer[0] - (time.monotonic() - started)) if old_timer[0] else 0
+        signal.setitimer(signal.ITIMER_REAL, remaining, old_timer[1])
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+def official_fetch(url, *, limit):
+    end = globals().get('_OVERALL_END')
+    remaining = 60 if end is None else min(60, end - time.monotonic())
+    if remaining <= 0:
+        raise ClosureError('overall deadline exceeded')
+    with deadline(remaining):
+        return discovery.fetch(url, limit=limit)
+
+
+def authenticated_indexes(document, keyring):
+    end = globals().get('_OVERALL_END')
+    remaining = 600 if end is None else min(600, end - time.monotonic())
+    if remaining <= 0:
+        raise ClosureError('overall deadline exceeded')
+    with deadline(remaining):
+        metadata = discovery.snapshot_metadata(keyring)
+    if document.get('snapshot') != metadata or set(metadata) != set(ARCHIVES):
+        raise ClosureError('authenticated snapshot differs from discovery')
+    indexes = []
+    for name, (_, dist) in ARCHIVES.items():
+        info = metadata[name]
+        url = archive_root(name) + 'dists/' + dist + '/main/binary-amd64/Packages.xz'
+        if info['packages_url'] != url or info['packages_size'] > 32 * 1024 * 1024:
+            raise ClosureError('unexpected index location or size')
+        blob = official_fetch(url, limit=info['packages_size'])
+        indexes.append((name, parse_index(blob, info['packages_size'], info['packages_sha256'])))
+    return indexes
+
+
+def require_ci():
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        raise ClosureError('GitHub Actions required')
+
+
+def parse_inventory(data):
+    try:
+        result, names = [], set()
+        for line in data.decode('ascii').splitlines():
+            status, name, version, arch = line.split('\t')
+            if status in ('un ', 'rc '):
+                continue
+            if ':' in name:
+                name, qualifier = name.split(':', 1)
+                if qualifier != arch:
+                    raise ValueError()
+            if status != 'ii ' or not re.fullmatch(r'[a-z0-9][a-z0-9+.-]*', name):
+                raise ValueError()
+            if not re.fullmatch(r'[A-Za-z0-9.+:~_-]{1,200}', version) or arch not in ('amd64', 'all'):
+                raise ValueError()
+            if name in names:
+                raise ValueError()
+            names.add(name)
+            result.append((name, version, arch))
+        if not result or len(result) > 10000:
+            raise ValueError()
+        return sorted(result)
+    except (ValueError, UnicodeError) as exc:
+        raise ClosureError('invalid dpkg inventory') from exc
+
+
+def parse_solver(data):
+    result, names = [], set()
+    try:
+        for line in data.decode('ascii').splitlines():
+            if line.startswith('Remv '):
+                raise ValueError()
+            if not line.startswith('Inst '):
+                continue
+            match = re.fullmatch(r'Inst ([a-z0-9][a-z0-9+.-]*)(?: \[[^]\n]+\])? \(([A-Za-z0-9.+:~_-]{1,200}) [^\n]*\[(amd64|all)\]\)', line)
+            if not match or match[1] in names:
+                raise ValueError()
+            names.add(match[1])
+            result.append(match.groups())
+        return sorted(result)
+    except (ValueError, UnicodeError) as exc:
+        raise ClosureError('invalid apt solver output') from exc
+
+
+def parse_index(data, size, sha256, *, max_uncompressed=128 * 1024 * 1024):
+    """Parse a Packages.xz whose size and hash come from authenticated metadata."""
+    if (not isinstance(size, int) or isinstance(size, bool) or size != len(data)
+            or not isinstance(sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', sha256)):
+        raise ClosureError('invalid index size or digest')
+    try:
+        discovery.verify_digest(data, 'sha256:' + sha256)
+        if not isinstance(max_uncompressed, int) or max_uncompressed < 1:
+            raise ClosureError('invalid decompression limit')
+        decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ, memlimit=256 * 1024 * 1024)
+        text = decoder.decompress(data, max_length=max_uncompressed + 1)
+        if len(text) > max_uncompressed or not decoder.eof or decoder.unused_data:
+            raise ClosureError('index exceeds limit or is incomplete')
+        lines = text.decode('utf-8').splitlines()
+    except (ValueError, lzma.LZMAError, UnicodeError, EOFError) as exc:
+        raise ClosureError('invalid index') from exc
+    records, fields, seen, last = [], {}, set(), None
+    for line in lines + ['']:
+        if not line:
+            if seen:
+                records.append(fields)
+                fields, seen, last = {}, set(), None
+        elif line[0] in ' \t':
+            if last is None:
+                raise ClosureError('orphan continuation')
+            if last in FIELDS:
+                fields[FIELDS[last]] += '\n' + line
+        else:
+            name, separator, value = line.partition(':')
+            if (not separator or not name or name[0] in '#-'
+                    or not re.fullmatch(r'[!-9;-~]+', name) or name.lower() in seen):
+                raise ClosureError('invalid or duplicate field')
+            last = name.lower()
+            seen.add(last)
+            if last in FIELDS:
+                fields[FIELDS[last]] = value.strip(' \t')
+    if not records:
+        raise ClosureError('empty index')
+    return records
+
+
+def _validate_package(package):
+    for field in ('Package', 'Version', 'Architecture', 'Filename', 'Size', 'SHA256'):
+        if not isinstance(package.get(field), str) or not package[field]:
+            raise ClosureError('missing package field')
+    if not re.fullmatch(r'[a-z0-9][a-z0-9+.-]*', package['Package']):
+        raise ClosureError('invalid package name')
+    if package['Architecture'] not in ('amd64', 'all'):
+        raise ClosureError('invalid architecture')
+    path = package['Filename']
+    if not re.fullmatch(r'pool/[A-Za-z0-9+._~/\-]+\.deb', path) or any(
+            part in ('', '.', '..') for part in path.split('/')):
+        raise ClosureError('invalid package path')
+    if (not re.fullmatch(r'[0-9]{1,19}', package['Size'])
+            or not 0 < int(package['Size']) <= 2**63 - 1):
+        raise ClosureError('invalid package size')
+    if not re.fullmatch(r'[0-9a-f]{64}', package['SHA256']):
+        raise ClosureError('invalid package hash')
+
+
+def match_installed(installed, indexes):
+    """Require a unique exact package/version/architecture in signed indexes."""
+    by_key = {}
+    for repository, records in indexes:
+        if repository not in ('main', 'security'):
+            raise ClosureError('invalid repository')
+        for package in records:
+            key = (package.get('Package'), package.get('Version'), package.get('Architecture'))
+            by_key.setdefault(key, []).append((repository, package))
+    result, seen = [], set()
+    for item in installed:
+        key = tuple(item)
+        if len(key) != 3 or key in seen:
+            raise ClosureError('invalid or duplicate installed package')
+        seen.add(key)
+        matches = by_key.get(key, [])
+        if len(matches) != 1:
+            raise ClosureError('missing or ambiguous installed package')
+        repository, package = matches[0]
+        _validate_package(package)
+        result.append({'repository': repository, 'package': package})
+    if not result:
+        raise ClosureError('empty installed inventory')
+    return result
+
+
+def relations(package):
+    result = {}
+    for field in ('Pre-Depends', 'Depends', 'Provides'):
+        if field not in package:
+            continue
+        groups = []
+        for group in package[field].split(','):
+            alternatives = []
+            for term in group.split('|'):
+                match = re.fullmatch(r'\s*([a-z0-9][a-z0-9+.-]*(?::(?:any|native|amd64))?)(?:\s*\((<<|<=|=|>=|>>)\s*([A-Za-z0-9.+:~_-]{1,200})\))?\s*', term)
+                if not match or (field == 'Provides' and match[2] not in (None, '=')):
+                    raise ClosureError('invalid dependency relation')
+                item = {'name': match[1]}
+                if match[2]:
+                    item.update(operator=match[2], version=match[3])
+                alternatives.append(item)
+            if field == 'Provides' and len(alternatives) != 1:
+                raise ClosureError('invalid Provides alternatives')
+            groups.append(alternatives)
+        result[field] = groups
+    return result
+
+
+def resolve_edges(rows, compare):
+    """Resolve each dependency against installed packages; ambiguous groups fail."""
+    packages = [row['package'] for row in rows]
+    providers = {}
+    for package in packages:
+        _validate_package(package)
+        entries = [(package['Package'], package['Version'])]
+        for group in relations(package).get('Provides', []):
+            entry = group[0]
+            if ':' in entry['name']:
+                raise ClosureError('qualified Provides unsupported')
+            entries.append((entry['name'], entry.get('version')))
+        for name, version in entries:
+            providers.setdefault(name, []).append((package, version))
+    edges = []
+    for package in packages:
+        for field, groups in relations(package).items():
+            if field == 'Provides':
+                continue
+            for group in groups:
+                candidates = []
+                for alternative in group:
+                    name, _, qualifier = alternative['name'].partition(':')
+                    for candidate, version in providers.get(name, []):
+                        if qualifier == 'any' and candidate.get('Multi-Arch') not in ('allowed', 'foreign'):
+                            continue
+                        if qualifier in ('native', 'amd64') and candidate['Architecture'] not in ('amd64', 'all'):
+                            continue
+                        if 'operator' in alternative and (version is None or not compare(
+                                version, alternative['operator'], alternative['version'])):
+                            continue
+                        candidates.append((candidate, name, version, alternative))
+                if len(candidates) != 1:
+                    raise ClosureError('dependency missing or ambiguous')
+                candidate, name, version, choice = candidates[0]
+                edges.append({'source': {'name': package['Package'], 'version': package['Version'],
+                                         'architecture': package['Architecture']},
+                              'field': field, 'alternatives': group, 'choice': choice,
+                              'provider': {'name': candidate['Package'], 'version': candidate['Version'],
+                                           'architecture': candidate['Architecture']},
+                              'via': name, 'provided_version': version})
+    return edges
+
+
+def compare_version(run, container, left, operator, right):
+    if (not re.fullmatch(r'[A-Za-z0-9.+:~_-]{1,200}', left)
+            or not re.fullmatch(r'[A-Za-z0-9.+:~_-]{1,200}', right)
+            or operator not in ('<<', '<=', '=', '>=', '>>')):
+        raise ClosureError('invalid version comparison')
+    try:
+        run(['docker', 'exec', container, 'dpkg', '--compare-versions', left, operator, right], timeout=30)
+        return True
+    except reference.ProbeExit as exc:
+        if exc.code == 1:
+            return False
+        raise ClosureError('dpkg version comparison failed') from exc
+
+
+def reconcile(base, selected, post, indexes):
+    expected = {name: (name, version, arch) for name, version, arch in base}
+    for item in selected:
+        expected[item[0]] = item
+    if len(post) != len(expected) or set(post) != set(expected.values()):
+        raise ClosureError('solver and installed inventory differ')
+    # The original base version must also exist, including when upgraded.
+    match_installed(base, indexes)
+    return match_installed(post, indexes)
+
+
+def verify_deb(package, data):
+    _validate_package(package)
+    if len(data) != int(package['Size']):
+        raise ClosureError('package size mismatch')
+    try:
+        return discovery.verify_digest(data, 'sha256:' + package['SHA256'])
+    except ValueError as exc:
+        raise ClosureError('package digest mismatch') from exc
+
+
+BASE_IMAGE = 'debian@' + discovery.BASE
+DPKG_QUERY = "dpkg-query -W -f='${db:Status-Abbrev}\\t${binary:Package}\\t${Version}\\t${Architecture}\\n'"
+SIMULATE = 'apt-get -s --no-install-recommends install '  # roots appended below
+APT_OPTIONS = ('-o Acquire::Check-Valid-Until=false -o Acquire::Languages=none '
+               '-o Acquire::Retries=0 -o APT::Get::List-Cleanup=0')
+CONFIGURE = ("set -eu; rm -f /etc/apt/sources.list.d/*; "
+             "printf '%s\\n' 'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] file:/mirror/main buster main' "
+             "'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] file:/mirror/security buster/updates main' > /etc/apt/sources.list; "
+             "printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d; chmod 755 /usr/sbin/policy-rc.d; "
+             "apt-get " + APT_OPTIONS + " update")
+
+
+def write_mirror(directory, metadata):
+    for name, (_, dist) in ARCHIVES.items():
+        info = metadata[name]
+        for suffix, expected_size, expected_sha in (
+            ('InRelease', None, info['inrelease_sha256']),
+            ('main/binary-amd64/Packages.xz', info['packages_size'], info['packages_sha256'])):
+            url = archive_root(name) + 'dists/' + dist + '/' + suffix
+            if suffix == 'InRelease' and info['inrelease_url'] != url:
+                raise ClosureError('unexpected InRelease URL')
+            with tempfile.TemporaryDirectory(prefix='fetch-', dir=directory.parent) as temp:
+                blob = official_fetch(url, limit=expected_size or 2 * 1024 * 1024)
+                if expected_size is not None and len(blob) != expected_size:
+                    raise ClosureError('mirror index size mismatch')
+                discovery.verify_digest(blob, 'sha256:' + expected_sha)
+                downloaded = Path(temp) / 'download'
+                downloaded.write_bytes(blob)
+                target = directory / name / 'dists' / dist / suffix
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(downloaded.read_bytes())
+
+
+def download_payloads(rows, directory):
+    for row in rows:
+        package, name = row['package'], row['repository']
+        size = int(package['Size'])
+        if size > 256 * 1024 * 1024:
+            raise ClosureError('package exceeds download limit')
+        url = archive_root(name) + package['Filename']
+        target_dir = directory / ('payload-' + uuid.uuid4().hex)
+        target_dir.mkdir()
+        payload = verify_deb(package, official_fetch(url, limit=size))
+        target = target_dir / 'package.deb'
+        target.write_bytes(payload)
+        target.chmod(0o644)
+        row['download_path'] = str(target.relative_to(directory))
+        row['artifact_url'] = url
+        row['relations'] = relations(package)
+
+
+def copy_archives(rows, directory, container, run):
+    targets = []
+    for row in rows:
+        package = row['package']
+        # apt uses the filename's canonical name with encoded epoch.
+        filename = (package['Package'] + '_' + package['Version'].replace(':', '%3a')
+                    + '_' + package['Architecture'] + '.deb')
+        targets.append(filename)
+    if len(set(targets)) != len(targets):
+        raise ClosureError('duplicate apt cache path')
+    for row, filename in zip(rows, targets):
+        source = directory / row['download_path']
+        verify_deb(row['package'], source.read_bytes())
+        run(['docker', 'cp', str(source), container + ':/var/cache/apt/archives/' + filename], timeout=60)
+
+
+def image_identity(data, document):
+    try:
+        image, = json.loads(data)
+        digests = image['RepoDigests']
+        if (document['platform'] != 'linux/amd64' or document['base']['manifest'] != discovery.BASE
+                or image['Id'] != document['base']['config'] or image['Os'] != 'linux'
+                or image['Architecture'] != 'amd64' or image['Config'].get('Volumes')
+                or not isinstance(digests, list)
+                or not any(d in (BASE_IMAGE, 'debian@' + discovery.BASE,
+                                  'docker.io/library/debian@' + discovery.BASE,
+                                  'library/debian@' + discovery.BASE) for d in digests)):
+            raise ValueError()
+        return image['Id']
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ClosureError('base identity mismatch') from exc
+
+
+def collect(document, temp, run):
+    run(['docker', 'pull', '--platform=linux/amd64', BASE_IMAGE], timeout=300)
+    image = image_identity(run(['docker', 'image', 'inspect', BASE_IMAGE], timeout=30), document)
+    results = {}
+    base_common = None
+    for kind, roots in ROOTS.items():
+        name = 'runtime-closure-' + uuid.uuid4().hex
+        mirror = temp / ('mirror-' + kind)
+        mirror.mkdir()
+        try:
+            run(['docker', 'create', '--name', name, '--platform=linux/amd64', '--network=none',
+                 '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
+                 '--memory=4g', '--cpus=2', '--pull=never', '--entrypoint=/bin/sh', image,
+                 '-c', 'while :; do sleep 60; done'], timeout=30)
+            run(['docker', 'start', name], timeout=30)
+            base = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
+            if base_common is not None and base != base_common:
+                raise ClosureError('base drift between roots')
+            base_common = base
+            keypath = temp / ('key-' + kind)
+            keypath.mkdir()
+            run(['docker', 'cp', name + ':/usr/share/keyrings/debian-archive-keyring.gpg',
+                 str(keypath / 'keyring.gpg')], timeout=30)
+            indexes = authenticated_indexes(document, keypath / 'keyring.gpg')
+            match_installed(base, indexes)
+            write_mirror(mirror, document['snapshot'])
+            run(['docker', 'cp', str(mirror), name + ':/mirror'], timeout=60)
+            run(['docker', 'exec', name, '/bin/sh', '-c', CONFIGURE], timeout=180)
+            pre = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
+            if pre != base:
+                raise ClosureError('pre-install inventory changed')
+            simulation = SIMULATE + ' '.join(roots)
+            plan_data = run(['docker', 'exec', name, '/bin/sh', '-c', simulation], timeout=120)
+            plan = parse_solver(plan_data)
+            selected = match_installed(plan, indexes) if plan else []
+            download_payloads(selected, mirror)
+            run(['docker', 'exec', name, '/bin/sh', '-c', 'chmod 755 /var/cache/apt/archives'], timeout=30)
+            copy_archives(selected, mirror, name, run)
+            install = ('DEBIAN_FRONTEND=noninteractive apt-get ' + APT_OPTIONS
+                       + ' --no-download --no-install-recommends -y install ' + ' '.join(roots))
+            run(['docker', 'exec', name, '/bin/sh', '-c', install], timeout=600)
+            run(['docker', 'exec', name, '/bin/sh', '-c', 'apt-get ' + APT_OPTIONS + ' check'], timeout=120)
+            post = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
+            final = reconcile(base, plan, post, indexes)
+            # Download and hash all post-install packages, including base packages.
+            download_payloads(final, mirror)
+            edges = resolve_edges(final, lambda left, op, right: compare_version(run, name, left, op, right))
+            for row in final:
+                row.pop('download_path', None)
+            results[kind] = {'roots': list(roots), 'base': base, 'pre': pre, 'post': post,
+                             'solver': plan_data.decode('ascii'), 'packages': final,
+                             'dependency_edges': edges}
+        finally:
+            run(['docker', 'rm', '-f', name], timeout=30)
+    return {'schema_version': 1, 'platform': 'linux/amd64', 'base_manifest': discovery.BASE,
+            'closures': results, 'limitations': ['Base provenance does not prove installed deb bytes.',
+                                                  'Unreviewed discovery is not a reproducible image.']}
+
+
+def read_discovery(path, *, limit=2 * 1024 * 1024):
+    with path.open('rb') as source:
+        data = source.read(limit + 1)
+    if len(data) > limit:
+        raise ClosureError('discovery JSON too large')
+    return json.loads(data)
+
+
+def write_output(path, result, *, limit=8 * 1024 * 1024):
+    data = (json.dumps(result, sort_keys=True, indent=2) + '\n').encode('utf-8')
+    if len(data) > limit:
+        raise ClosureError('output exceeds limit')
+    fd, tmp = tempfile.mkstemp(prefix='.closure-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(tmp, path)
+    except BaseException as first:
+        try:
+            os.unlink(tmp)
+        except OSError as cleanup:
+            first.add_note('temporary output cleanup failed')
+            raise first from cleanup
+        raise
+    else:
+        try:
+            os.unlink(tmp)
+        except OSError as exc:
+            raise PublishedCleanupError('evidence published; temporary cleanup failed') from exc
+
+
+def main():
+    global _OVERALL_END
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--discoveryJSON', required=True, type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    args = parser.parse_args()
+    require_ci()
+    if args.output.exists() or args.output.is_symlink():
+        raise ClosureError('output already exists')
+    document = read_discovery(args.discoveryJSON)
+    with tempfile.TemporaryDirectory(prefix='runtime-closure-') as tmp:
+        root = Path(tmp)
+        config = root / 'docker-config'
+        config.mkdir()
+        env = {'PATH': os.defpath, 'HOME': str(config), 'DOCKER_CONFIG': str(config),
+               'DOCKER_HOST': 'unix:///var/run/docker.sock', 'LC_ALL': 'C'}
+        end = time.monotonic() + 1800
+        _OVERALL_END = end
+        def run(args, *, timeout):
+            remaining = end - time.monotonic()
+            cleanup = args[1:3] == ['rm', '-f']
+            if remaining <= 0 and not cleanup:
+                raise ClosureError('overall deadline exceeded')
+            if cleanup:
+                # Cleanup retains its own deadline even after the overall alarm.
+                old_timer = signal.setitimer(signal.ITIMER_REAL, 0)
+                try:
+                    return reference.bounded_run(args, timeout=timeout, env=env)
+                finally:
+                    if old_timer[0] > 0:
+                        signal.setitimer(signal.ITIMER_REAL, max(0.001, end - time.monotonic()))
+            return reference.bounded_run(args, timeout=min(timeout, remaining), env=env)
+        def expired(signum, frame):
+            raise TimeoutError('overall deadline exceeded')
+        previous_handler = signal.signal(signal.SIGALRM, expired)
+        previous_timer = signal.setitimer(signal.ITIMER_REAL, 1800)
+        try:
+            result = collect(document, root, run)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+            signal.signal(signal.SIGALRM, previous_handler)
+        write_output(args.output, result)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except PublishedCleanupError:
+        print('evidence published; temporary cleanup failed', file=sys.stderr)
+        sys.exit(1)
+    except Exception:
+        print('package closure failed; no evidence produced', file=sys.stderr)
+        sys.exit(1)
