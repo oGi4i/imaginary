@@ -51,6 +51,23 @@ class DiscoveryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             d.check_signature('[GNUPG:] BADSIG x', fp)
 
+    def test_cosigned_release_requires_valid_expected_primary(self):
+        expected = d.SIGNERS['main']
+        def validsig(primary):
+            return '[GNUPG:] VALIDSIG ' + 'B' * 40 + ' 2023-06-10 1686387213 0 4 0 1 8 01 ' + primary
+        d.check_signature(validsig('A' * 40) + '\n' + validsig(expected), expected)
+        malformed = '[GNUPG:] VALIDSIG ' + 'B' * 40 + ' secret secret secret secret secret secret secret secret ' + expected
+        for status in (validsig('A' * 40), validsig(expected) + '\n[GNUPG:] VALIDSIG malformed', malformed):
+            with self.assertRaises(ValueError):
+                d.check_signature(status, expected)
+
+    def test_signature_status_failure_is_redacted_and_specific(self):
+        with self.assertRaises(d.DiscoveryError) as raised:
+            with d.stage('snapshot_main_gpgv'):
+                d.check_signature('[GNUPG:] VALIDSIG private', d.SIGNERS['main'])
+        self.assertEqual(str(raised.exception), 'snapshot_main_gpgv: signer count=1 fields=3 expected=0')
+        self.assertNotIn('private', str(raised.exception))
+
     def test_incomplete_result_shape(self):
         archive = {'filename': 'go1.20.14.linux-amd64.tar.gz', 'os': 'linux',
                    'arch': 'amd64', 'kind': 'archive', 'sha256': 'a' * 64}

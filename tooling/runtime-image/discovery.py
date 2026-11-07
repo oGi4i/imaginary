@@ -37,6 +37,14 @@ class DiscoveryError(Exception):
     pass
 
 
+class SignerError(ValueError):
+    def __init__(self, count, field_counts, expected_present):
+        super().__init__('signature status rejected')
+        self.count = count
+        self.field_counts = field_counts
+        self.expected_present = expected_present
+
+
 @contextmanager
 def stage(name):
     try:
@@ -44,6 +52,10 @@ def stage(name):
     except DiscoveryError:
         raise
     except Exception as error:
+        if isinstance(error, SignerError):
+            detail = (f'signer count={error.count} fields={error.field_counts} '
+                      f'expected={int(error.expected_present)}')
+            raise DiscoveryError(name + ': ' + detail) from None
         if (isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) or
                 isinstance(error, urllib.error.URLError) and isinstance(error.reason, TimeoutError)):
             category = 'timeout'
@@ -91,8 +103,17 @@ def check_manifest(manifest, config):
 
 def check_signature(status, expected):
     valid = [line.split() for line in status.splitlines() if line.startswith('[GNUPG:] VALIDSIG ')]
-    if len(valid) != 1 or len(valid[0]) < 12 or valid[0][-1] != expected:
-        raise ValueError('signature does not match expected primary key')
+    timestamp = r'(?:[0-9]+|[0-9]{8}T[0-9]{6})'
+    well_formed = all(len(parts) == 12 and re.fullmatch(r'[0-9A-F]{40}', parts[2])
+                      and re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', parts[3])
+                      and re.fullmatch(timestamp, parts[4]) and re.fullmatch(timestamp, parts[5])
+                      and all(re.fullmatch(r'[0-9]+', parts[i]) for i in (6, 7, 8, 9))
+                      and re.fullmatch(r'[0-9A-Fa-f]{2}', parts[10])
+                      and re.fullmatch(r'[0-9A-F]{40}', parts[11]) for parts in valid)
+    expected_present = any(len(parts) == 12 and parts[11] == expected for parts in valid)
+    if not valid or len(valid) > 16 or not well_formed or not expected_present:
+        raise SignerError(min(len(valid), 17), ','.join(str(min(len(p), 99)) for p in valid[:16]),
+                          expected_present)
 
 
 def verify_index(release, path, data):
