@@ -612,6 +612,85 @@ class ClosureTest(unittest.TestCase):
                 c.resolve_edges([{'package': source}, {'package': foo}, {'package': bar}], lambda *args: True)
             self.assertEqual(caught.exception.reason, 'ambiguous_provider')
 
+    def test_graph_conflict_exposes_only_bounded_validated_identities(self):
+        source = record('source', '1:2-3'); source.pop('Provides')
+        source['Depends'] = 'foo (>= 1) | virtual'
+        foo = record('foo'); foo.pop('Depends'); foo.pop('Provides')
+        bar = record('bar', '2'); bar.pop('Depends'); bar['Provides'] = 'virtual'
+        with self.assertRaises(c.DiagnosticError) as caught:
+            try:
+                with c.stage('graph', 'build'):
+                    c.resolve_edges([{'package': p} for p in (source, foo, bar)], lambda *args: True)
+            finally:
+                with c.cleanup_stage('build'):
+                    pass
+        message = c.diagnostic_message(caught.exception)
+        self.assertIn('reason=ambiguous_provider cleanup=succeeded', message)
+        conflict = json.loads(message.split('\ngraph_conflict=', 1)[1])
+        self.assertEqual(conflict['source'], {'name': 'source', 'version': '1:2-3', 'architecture': 'amd64'})
+        self.assertEqual(conflict['field'], 'Depends')
+        self.assertEqual(conflict['alternatives'], [{'name': 'foo', 'operator': '>=', 'version': '1'},
+                                                     {'name': 'virtual'}])
+        self.assertEqual({p['name'] for p in conflict['providers']}, {'foo', 'bar'})
+        self.assertEqual((conflict['alternative_count'], conflict['provider_count']), (2, 2))
+        self.assertFalse(conflict['truncated'])
+        self.assertNotIn('pool/', message)
+        self.assertLessEqual(len(message.encode('ascii')), 4096)
+
+    def test_graph_conflict_rejects_untrusted_fields_and_resanitizes(self):
+        identity = {'name': 'example', 'version': '1', 'architecture': 'amd64'}
+        valid = {'source': identity, 'field': 'Depends', 'alternatives': [{'name': 'foo'}],
+                 'providers': [identity, dict(identity, name='foo')],
+                 'alternative_count': 1, 'provider_count': 2, 'truncated': False}
+        malformed = [dict(valid, path='/private/token'), dict(valid, field='secret'),
+                     dict(valid, source=dict(identity, version='/private/token')),
+                     dict(valid, source=dict(identity, version='1\npassword=secret')),
+                     dict(valid, source=dict(identity, name='x' * 10000)),
+                     dict(valid, alternatives=[{'name': 'foo', 'token': 'secret'}]),
+                     dict(valid, alternatives=[{'name': 'foo', 'operator': 'BAD', 'version': '1'}]),
+                     dict(valid, providers=[identity, dict(identity, version='https://private')]),
+                     dict(valid, provider_count=True)]
+        for conflict in malformed:
+            with self.subTest(conflict=conflict):
+                self.assertIsNone(c.sanitize_graph_conflict(conflict))
+                exc = c.DiagnosticError('graph', 'build', 'closure_error',
+                                        reason='ambiguous_provider', conflict=conflict)
+                self.assertNotIn('graph_conflict=', c.diagnostic_message(exc))
+        exc = c.DiagnosticError('graph', 'build', 'closure_error',
+                                reason='ambiguous_provider', conflict=valid)
+        exc.conflict['source']['version'] = '/private/token'
+        self.assertNotIn('graph_conflict=', c.diagnostic_message(exc))
+        self.assertNotIn('graph_conflict=', c.diagnostic_message(c.DiagnosticError(
+            'solver', 'build', 'other', conflict=valid)))
+
+    def test_graph_conflict_limits_lists_and_serialized_bytes(self):
+        source = record('source'); source.pop('Provides')
+        source['Pre-Depends'] = ' | '.join('provider' + str(i) for i in range(20))
+        source.pop('Depends')
+        providers = []
+        for i in range(20):
+            provider = record('provider' + str(i)); provider.pop('Depends'); provider.pop('Provides')
+            providers.append(provider)
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('graph', 'runtime'):
+                c.resolve_edges([{'package': p} for p in [source] + providers], lambda *args: True)
+        message = c.diagnostic_message(caught.exception)
+        conflict = json.loads(message.split('\ngraph_conflict=', 1)[1])
+        self.assertEqual((conflict['alternative_count'], conflict['provider_count']), (20, 20))
+        self.assertLessEqual(len(conflict['alternatives']), 8)
+        self.assertLessEqual(len(conflict['providers']), 8)
+        self.assertTrue(conflict['truncated'])
+        self.assertEqual(conflict['field'], 'Pre-Depends')
+        self.assertLessEqual(len(message.encode('ascii')), 4096)
+        long = {'name': 'p' * 96, 'version': '1' * 80, 'architecture': 'amd64'}
+        raw = {'source': long, 'field': 'Depends',
+               'alternatives': [{'name': 'p' * 96, 'operator': '>=', 'version': '1' * 80}] * 8,
+               'providers': [long] * 8, 'alternative_count': 8, 'provider_count': 8, 'truncated': False}
+        bounded = c.sanitize_graph_conflict(raw)
+        self.assertIsNotNone(bounded)
+        self.assertLessEqual(len(json.dumps(bounded).encode('ascii')), 3800)
+        self.assertTrue(bounded['truncated'])
+
     def test_graph_reasons_are_fixed_and_do_not_expose_package_data(self):
         source = record('source')
         source.pop('Provides')
@@ -626,8 +705,10 @@ class ClosureTest(unittest.TestCase):
             with self.subTest(reason=reason), self.assertRaises(c.DiagnosticError) as caught:
                 with c.stage('graph', 'build'):
                     c.resolve_edges(rows, lambda *args: True)
-            self.assertEqual(c.diagnostic_message(caught.exception),
+            message = c.diagnostic_message(caught.exception)
+            self.assertEqual(message.splitlines()[0],
                              f'closure failure stage=graph kind=build category=closure_error reason={reason} cleanup=not_attempted')
+            self.assertEqual('graph_conflict=' in message, reason == 'ambiguous_provider')
 
     def test_dpkg_compare_uses_argument_array_and_checks_exit(self):
         runner = mock.Mock(return_value=b'')

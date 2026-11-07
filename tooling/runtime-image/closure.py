@@ -47,12 +47,72 @@ GRAPH_REASONS = frozenset(('invalid_relation', 'missing_provider', 'ambiguous_pr
                            'invalid_package', 'version_compare'))
 
 
+def sanitize_graph_conflict(value):
+    """Copy only bounded public metadata; malformed details yield no output."""
+    def name(text, qualified=False):
+        pattern = r'[a-z0-9][a-z0-9+.-]{0,95}'
+        if qualified:
+            pattern += r'(?::(?:any|native|amd64))?'
+        return isinstance(text, str) and re.fullmatch(pattern, text) is not None
+
+    def version(text):
+        return isinstance(text, str) and re.fullmatch(r'[0-9][A-Za-z0-9.+:~_-]{0,79}', text) is not None
+
+    def identity(item):
+        if (not isinstance(item, dict) or set(item) != {'name', 'version', 'architecture'}
+                or not name(item['name']) or not version(item['version'])
+                or item['architecture'] not in ('amd64', 'all')):
+            raise ValueError('invalid identity')
+        return dict(item)
+
+    try:
+        if (not isinstance(value, dict) or set(value) != {
+                'source', 'field', 'alternatives', 'providers', 'alternative_count',
+                'provider_count', 'truncated'} or value['field'] not in ('Depends', 'Pre-Depends')
+                or type(value['truncated']) is not bool):
+            return None
+        result = {'source': identity(value['source']), 'field': value['field']}
+        for key in ('alternatives', 'providers'):
+            items, count = value[key], value[key[:-1] + '_count']
+            if (not isinstance(items, list) or not 1 <= len(items) <= 8
+                    or type(count) is not int or not len(items) <= count <= 1000000):
+                return None
+            clean = []
+            for item in items:
+                if key == 'providers':
+                    clean.append(identity(item))
+                else:
+                    if (not isinstance(item, dict) or set(item) not in (
+                            {'name'}, {'name', 'operator', 'version'})
+                            or not name(item['name'], qualified=True)):
+                        return None
+                    if 'operator' in item and (item['operator'] not in ('<<', '<=', '=', '>=', '>>')
+                                               or not version(item['version'])):
+                        return None
+                    clean.append(dict(item))
+            result[key] = clean
+            result[key[:-1] + '_count'] = count
+        result['truncated'] = value['truncated'] or any(
+            len(result[key]) < result[key[:-1] + '_count'] for key in ('alternatives', 'providers'))
+        # Leave room for the fixed error line and JSON field label below 4 KiB.
+        while len(json.dumps(result, ensure_ascii=True).encode('ascii')) > 3800:
+            key = max(('alternatives', 'providers'), key=lambda k: len(result[k]))
+            if len(result[key]) <= 1:
+                return None
+            result[key].pop()
+            result['truncated'] = True
+        return result
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class GraphError(ClosureError):
-    def __init__(self, reason):
+    def __init__(self, reason, conflict=None):
         if reason not in GRAPH_REASONS:
             raise ValueError('invalid graph diagnostic')
         super().__init__('dependency graph rejected')
         self.reason = reason
+        self.conflict = sanitize_graph_conflict(conflict) if reason == 'ambiguous_provider' else None
 
 
 APT_REASONS = frozenset(('missing_key', 'invalid_signature', 'missing_release', 'not_found',
@@ -106,7 +166,7 @@ CLEANUP_STATES = frozenset(('not_attempted', 'succeeded', 'failed'))
 
 
 class DiagnosticError(Exception):
-    def __init__(self, where, kind, category, code=None, cleanup='not_attempted', reason=None, errors=()):
+    def __init__(self, where, kind, category, code=None, cleanup='not_attempted', reason=None, errors=(), conflict=None):
         if (where not in STAGES or kind not in KINDS or category not in CATEGORIES
                 or cleanup not in CLEANUP_STATES or (code is not None and
                 (category != 'command_exit' or type(code) is not int or not 1 <= code <= 255))
@@ -120,6 +180,8 @@ class DiagnosticError(Exception):
         self.reason = reason
         self.errors = (sanitize_apt_lines('\n'.join(errors).encode('ascii', errors='replace'))
                        if where == 'configure' else ())
+        self.conflict = (sanitize_graph_conflict(conflict) if where == 'graph'
+                         and category == 'closure_error' and reason == 'ambiguous_provider' else None)
 
 
 def classify(exc):
@@ -159,6 +221,10 @@ def diagnostic_message(exc):
     message += f' cleanup={exc.cleanup}'
     if exc.errors:
         message += '\napt_errors=' + json.dumps(exc.errors, ensure_ascii=True)
+    conflict = (sanitize_graph_conflict(exc.conflict) if exc.where == 'graph'
+                and exc.category == 'closure_error' and exc.reason == 'ambiguous_provider' else None)
+    if conflict is not None:
+        message += '\ngraph_conflict=' + json.dumps(conflict, ensure_ascii=True)
     return message
 
 
@@ -181,7 +247,8 @@ def stage(where, kind='none'):
         if where == 'graph' and type(exc) is GraphError and exc.reason in GRAPH_REASONS:
             reason = exc.reason
         errors = exc.errors if where == 'configure' and type(exc) is AptConfigureError else ()
-        raise DiagnosticError(where, kind, category, code, cleanup, reason, errors) from exc
+        conflict = exc.conflict if where == 'graph' and type(exc) is GraphError else None
+        raise DiagnosticError(where, kind, category, code, cleanup, reason, errors, conflict) from exc
 
 
 @contextmanager
@@ -507,7 +574,15 @@ def resolve_edges(rows, compare):
                 if not candidates:
                     raise GraphError('missing_provider')
                 if len(candidates) != 1:
-                    raise GraphError('ambiguous_provider')
+                    conflict = {
+                        'source': {'name': package['Package'], 'version': package['Version'],
+                                   'architecture': package['Architecture']},
+                        'field': field, 'alternatives': group[:8],
+                        'providers': [{'name': name, 'version': version, 'architecture': architecture}
+                                      for name, version, architecture in sorted(candidates)[:8]],
+                        'alternative_count': len(group), 'provider_count': len(candidates),
+                        'truncated': len(group) > 8 or len(candidates) > 8}
+                    raise GraphError('ambiguous_provider', conflict)
                 candidate, name, version, choice = next(iter(candidates.values()))
                 edges.append({'source': {'name': package['Package'], 'version': package['Version'],
                                          'architecture': package['Architecture']},
