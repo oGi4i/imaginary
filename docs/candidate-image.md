@@ -1,6 +1,6 @@
 # Candidate image build design
 
-This is a **blocked design**, not a Dockerfile or a reproducible image. No candidate image has been built or qualified. Image builds and publication require separate approval. Native execution is not approved locally; the existing GitHub Actions tests use a different Ubuntu ABI and do not validate this design.
+This is a **partially implemented build design**, not a reproducible image. No candidate image has been built or qualified. The runtime-input workflow now verifies public base/toolchain metadata and signed snapshot indexes; see [runtime inputs](runtime-inputs.md). The separate [reference inventory](reference-inventory.md) remains incomplete where the published image lacks tools. Complete package closures and the locked recipe are still required. Image publication and deployment remain separate from CI input/build execution. Native execution is not approved locally; the existing Ubuntu source tests do not validate the serving ABI.
 
 ## Reference and fixed inputs
 
@@ -53,7 +53,7 @@ These values are **not yet established** and must not be replaced with floating 
 - A dated Debian snapshot, signing keys and exact versions and checksums for the complete build and runtime package closures. Capture the reference's installed package manifest, dynamic-library closure, libvips configure/features and loader inventory first. A matching glibc version alone is insufficient to preserve native behavior.
 - Exact fork commit, clean source tree, build flags and environment; pinned workflow actions, Dockerfile frontend and image builder. Record the libvips archive URL and verified checksum in the lock alongside the module files and acquisition policy.
 
-Current source authorization covers the public libvips 8.10 release and `go.sum`-verified Go dependencies on GitHub runners. Before fetching or executing other inputs, request approval for the official Go and Debian image registries and manifests, the Debian snapshot and signed packages, GitHub Actions/build tools, and any Go proxy or checksum service not already covered by that authorization. Request separate approval to inspect the reference image and its native package and loader inventory if that requires access outside the approved public sources. Approval of source access does not approve image building, publication, cluster changes, or local native execution.
+The current continuation covers official Go/Debian/build-tool input verification, the public reference inventory and GitHub-hosted candidate image builds retained as CI artifacts. Reference inventory uses fixed read-only commands in the exact pinned image under isolated, non-root execution; it does not start the service. These permissions do not extend to registry publication, local native execution, cluster actions or production changes. Verified metadata is recorded by the discovery workflow, but missing artifact hashes, package closures and features remain blockers rather than guessed values.
 
 ## Provenance and release gate
 

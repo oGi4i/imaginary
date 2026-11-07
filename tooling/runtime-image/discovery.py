@@ -89,6 +89,20 @@ def go_archive(records):
     return matches[0]
 
 
+def verify_go_payload(record):
+    size = record['size']
+    if type(size) is not int or not 0 < size <= 128 * 1024 * 1024:
+        raise ValueError('invalid Go archive size')
+    if record['filename'] != 'go1.20.14.linux-amd64.tar.gz':
+        raise ValueError('invalid Go archive filename')
+    url = 'https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz'
+    data = fetch(url, limit=size)
+    if len(data) != size:
+        raise ValueError('Go archive size mismatch')
+    verify_digest(data, 'sha256:' + record['sha256'])
+    return dict(record, payload_url=url, payload_verified=True)
+
+
 def check_manifest(manifest, config):
     obj = json.loads(manifest)
     descriptor = obj['config']
@@ -281,6 +295,8 @@ def main():
         base = registry_manifest('library/debian', BASE)
     with stage('go_json'):
         go = go_archive(json.loads(fetch('https://go.dev/dl/?mode=json&include=all')))
+    with stage('go_payload'):
+        go = verify_go_payload(go)
     snapshot = snapshot_metadata(args.keyring.resolve())
     result = {'platform': 'linux/amd64', 'base': base, 'go': go, 'snapshot': snapshot,
               'build_packages': None, 'runtime_packages': None, 'reference_inventory': None,

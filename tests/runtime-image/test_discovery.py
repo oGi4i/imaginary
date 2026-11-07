@@ -34,6 +34,25 @@ class DiscoveryTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 d.go_archive(records)
 
+    def test_go_payload_verified_only_after_exact_size_and_hash(self):
+        data = b'test archive'
+        record = {'filename': 'go1.20.14.linux-amd64.tar.gz', 'size': len(data),
+                  'sha256': hashlib.sha256(data).hexdigest()}
+        with mock.patch.object(d, 'fetch', return_value=data) as fetch:
+            result = d.verify_go_payload(record)
+        self.assertTrue(result['payload_verified'])
+        self.assertEqual(result['payload_url'], 'https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz')
+        self.assertLessEqual(fetch.call_args.kwargs['limit'], 128 * 1024 * 1024)
+        for bad in (dict(record, size=len(data) + 1), dict(record, sha256='0' * 64),
+                    {k: v for k, v in record.items() if k != 'size'}, dict(record, size=-1)):
+            with self.subTest(bad=bad), mock.patch.object(d, 'fetch', return_value=data):
+                with self.assertRaises((ValueError, KeyError)):
+                    d.verify_go_payload(bad)
+        with mock.patch.object(d, 'fetch', side_effect=OSError('network')):
+            with self.assertRaises(OSError):
+                d.verify_go_payload(record)
+        self.assertNotIn('payload_verified', record)
+
     def test_platform_manifest_checks_config_and_digest(self):
         config = json.dumps({'architecture': 'amd64', 'os': 'linux'}).encode()
         manifest = json.dumps({'schemaVersion': 2, 'config': {
@@ -75,6 +94,7 @@ class DiscoveryTest(unittest.TestCase):
             target = Path(tmp) / 'evidence.json'
             with mock.patch.object(d, 'registry_manifest', return_value={'manifest': d.BASE}), \
                  mock.patch.object(d, 'fetch', return_value=json.dumps([{'version': 'go1.20.14', 'files': [archive]}]).encode()), \
+                 mock.patch.object(d, 'verify_go_payload', side_effect=lambda record: dict(record, payload_verified=True)), \
                  mock.patch.object(d, 'snapshot_metadata', return_value={'main': {}, 'security': {}}), \
                  mock.patch('sys.argv', ['discovery', '--keyring', 'keyring', '--output', str(target)]):
                 d.main()
