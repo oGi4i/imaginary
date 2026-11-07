@@ -55,8 +55,10 @@ and source-lock CLI validate structure and list unresolved inputs. Its
 `--json` emits validity and unresolved fields without authenticating them.
 They do not build an image; see [candidate image](docs/candidate-image.md).
 The separate [runtime-input discovery](docs/runtime-inputs.md) workflow is
-incomplete preparation for authenticated inputs and reference inventory. It does
-not produce a candidate image or establish reproducibility. Its independent
+incomplete preparation for authenticated inputs and reference inventory. Its
+source-only verifier proposes an unqualified package lock after a pinned replay;
+hosted success remains unproven. It does not produce a candidate image or
+establish reproducibility. Its independent
 [published-reference inventory](docs/reference-inventory.md) job records only
 available parsed package/native observations; missing tools leave evidence
 incomplete. Its closure step resolves separate build/runtime package inventories

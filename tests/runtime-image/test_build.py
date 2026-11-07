@@ -63,7 +63,7 @@ class BuildPreparationTests(unittest.TestCase):
                           'repository': 'main', 'url': url, 'size': 4, 'sha256': pkg['SHA256'],
                           'provenance': 'base', 'dependencies': ['b', 'c'] if name == 'a' else []})
         edges = build.closure.resolve_edges(rows, lambda *args: True)
-        part = {'post': post, 'base': post, 'pre': post, 'roots': ['a'],
+        part = {'post': post, 'base': post, 'pre': post, 'roots': ['a'], 'solver': '',
                 'packages': given, 'dependency_edges': edges}
         document = {'schema_version': 1, 'platform': 'linux/amd64', 'base_manifest': build.discovery.BASE,
                     'closures': {'build': copy.deepcopy(part), 'runtime': copy.deepcopy(part)}}
@@ -73,6 +73,16 @@ class BuildPreparationTests(unittest.TestCase):
         roots_patch.start()
         self.addCleanup(roots_patch.stop)
         build.validate_closure(document, indexes, lock, lambda *args: True)
+        build.validate_closure_evidence(document, indexes, lambda *args: True)
+        for field, value in [('origins', []), ('artifact_url', 'https://invalid/')]:
+            altered = copy.deepcopy(document)
+            altered['closures']['build']['packages'][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                build.validate_closure_evidence(altered, indexes, lambda *args: True)
+        altered = copy.deepcopy(document)
+        altered['closures']['build']['solver'] = 'Inst a (2 test [amd64])\n'
+        with self.assertRaises(ValueError):
+            build.validate_closure_evidence(altered, indexes, lambda *args: True)
         mutations = [lambda e: e.pop(), lambda e: e.append(copy.deepcopy(e[0])),
                      lambda e: e[0]['provider'].update(name='a'),
                      lambda e: e[0]['provider'].update(version='2'),
@@ -97,7 +107,7 @@ class BuildPreparationTests(unittest.TestCase):
         row = build.closure.match_installed(post, indexes)[0]
         url = build.closure.archive_root('main') + pkg['Filename']
         given = dict(row, artifact_url=url, relations=build.closure.relations(pkg))
-        part = {'post': post, 'base': post, 'pre': post, 'roots': ['virtual'],
+        part = {'post': post, 'base': post, 'pre': post, 'roots': ['virtual'], 'solver': '',
                 'packages': [given], 'dependency_edges': []}
         document = {'schema_version': 1, 'platform': 'linux/amd64', 'base_manifest': build.discovery.BASE,
                     'closures': {'build': copy.deepcopy(part), 'runtime': copy.deepcopy(part)}}

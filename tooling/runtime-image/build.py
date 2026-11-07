@@ -85,9 +85,11 @@ def validate_edges(rows, edges, compare):
         raise ValueError('dependency edges differ from authenticated packages')
 
 
-def validate_closure(document, indexes, lock=None, compare=None):
-    if not isinstance(document, dict) or document.get('schema_version') != 1 or document.get('platform') != 'linux/amd64' or document.get('base_manifest') != discovery.BASE or lock is None:
+def validate_closure_evidence(document, indexes, compare):
+    if not isinstance(document, dict) or document.get('schema_version') != 1 or document.get('platform') != 'linux/amd64' or document.get('base_manifest') != discovery.BASE:
         raise ValueError('invalid closure')
+    if compare is None:
+        raise ValueError('missing Debian version comparator')
     result = {}
     for kind in ('build', 'runtime'):
         try:
@@ -96,25 +98,46 @@ def validate_closure(document, indexes, lock=None, compare=None):
             base = [tuple(row) for row in part['base']]
             if part['pre'] != part['base'] or part['roots'] != list(closure.ROOTS[kind]):
                 raise ValueError('closure roots or pre-inventory mismatch')
-            rows = closure.match_installed(post, indexes)
-            if populate_lock.resolve_roots(part['roots'], rows) != lock[kind + '_roots']:
-                raise ValueError('resolved roots differ from lock')
-            closure.match_installed(base, indexes)
+            selected = closure.parse_solver(part['solver'].encode('ascii'))
+            rows = closure.reconcile(base, selected, post, indexes)
             given = part['packages']
             if len(rows) != len(given) or not rows:
                 raise ValueError('closure package count mismatch')
             by_name = {row['package']['Package']: row for row in given}
+            if len(by_name) != len(rows):
+                raise ValueError('closure duplicate package')
+            for row in rows:
+                pkg = row['package']
+                actual = by_name[pkg['Package']]
+                expected = dict(row, artifact_url=closure.archive_root(row['repository']) + pkg['Filename'],
+                                relations=closure.relations(pkg))
+                if actual != expected:
+                    raise ValueError('closure package differs from signed index')
+            validate_edges(rows, part['dependency_edges'], compare)
+            result[kind] = (rows, post)
+        except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+            raise ValueError('invalid closure: ' + str(exc)) from exc
+    return result
+
+
+def validate_closure(document, indexes, lock=None, compare=None):
+    if lock is None:
+        raise ValueError('invalid closure')
+    result = validate_closure_evidence(document, indexes, compare)
+    for kind in ('build', 'runtime'):
+        try:
+            part = document['closures'][kind]
+            rows, _ = result[kind]
+            base = [tuple(row) for row in part['base']]
+            if populate_lock.resolve_roots(part['roots'], rows) != lock[kind + '_roots']:
+                raise ValueError('resolved roots differ from lock')
             locks = {row['name']: row for row in lock[kind + '_packages']}
-            if len(by_name) != len(rows) or len(locks) != len(rows):
+            if len(locks) != len(rows):
                 raise ValueError('closure duplicate package')
             for row in rows:
                 pkg = row['package']
                 name = pkg['Package']
-                actual = by_name[name]
                 expected_url = closure.archive_root(row['repository']) + pkg['Filename']
-                if (actual['repository'] != row['repository'] or actual['package'] != pkg
-                        or actual['artifact_url'] != expected_url or actual['relations'] != closure.relations(pkg)):
-                    raise ValueError('closure package differs from signed index')
                 item = locks[name]
                 identity = (name, pkg['Version'], pkg['Architecture'])
                 expected = (name, item['version'], item['architecture'])
@@ -123,16 +146,9 @@ def validate_closure(document, indexes, lock=None, compare=None):
                         or item['sha256'] != pkg['SHA256']
                         or item['provenance'] != ('base' if identity in base else 'snapshot')):
                     raise ValueError('closure differs from lock')
-            edges = part['dependency_edges']
-            if compare is None:
-                raise ValueError('missing Debian version comparator')
-            validate_edges(rows, edges, compare)
-            for row in rows:
-                name = row['package']['Package']
-                dependencies = sorted({edge['provider']['name'] for edge in edges if edge['source']['name'] == name})
-                if dependencies != sorted(locks[name]['dependencies']):
+                dependencies = sorted({edge['provider']['name'] for edge in part['dependency_edges'] if edge['source']['name'] == name})
+                if dependencies != sorted(item['dependencies']):
                     raise ValueError('closure dependencies differ from lock')
-            result[kind] = (rows, post)
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError('invalid closure: ' + str(exc)) from exc
     return result
@@ -420,28 +436,7 @@ def measure_base(temp, metadata):
             remove_owned_container(name, env)
 
 
-def prepare(lock, evidence, metadata, keyring, output, go, vips, validator, modules, source, actual_base):
-    validate_tools(lock['build_tools'])
-    if lock['platform'] != 'linux/amd64' or lock['builder_image'] != BASE or lock['runtime_image'] != BASE:
-        raise ValueError('unexpected platform or base')
-    config = lock['build']
-    if (config['configure'] != CONFIGURE or config['cflags'] != ['-g', '-O3']
-            or config['cxxflags'] != ['-D_GLIBCXX_USE_CXX11_ABI=0', '-g', '-O3']
-            or config['go_flags'] != ['-trimpath'] or config['module_mode'] != 'readonly'):
-        raise ValueError('unexpected build configuration')
-    validate_lock_cli(validator, lock['_path'])
-    for name in ('go.mod', 'go.sum'):
-        if hashlib.sha256((source / name).read_bytes()).hexdigest() != config[name.replace('.', '_') + '_sha256']:
-            raise ValueError('module file hash mismatch')
-    tool = lock['go_toolchain']
-    if tool != {'version': '1.20.14', 'url': 'https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz', 'size': 100448992, 'sha256': GO_SHA256}:
-        raise ValueError('unexpected Go pin')
-    verify_blob(go.read_bytes(), tool['size'], GO_SHA256)
-    blob = vips.read_bytes()
-    if lock['libvips'] != {'version': '8.10.0', 'archive_url': VIPS_URL, 'archive_sha256': VIPS_SHA256} or hashlib.sha256(blob).hexdigest() != VIPS_SHA256:
-        raise ValueError('vips digest mismatch')
-    if output.exists():
-        raise ValueError('output already exists')
+def validate_snapshot_pins(lock, metadata, keyring):
     if lock['snapshot']['date'] != '20240408T000000Z':
         raise ValueError('unexpected snapshot date')
     for name in ('main', 'security'):
@@ -466,6 +461,31 @@ def prepare(lock, evidence, metadata, keyring, output, go, vips, validator, modu
         for field, key in [('origin', 'Origin'), ('label', 'Label'), ('codename', 'Codename'), ('suite', 'Suite'), ('date', 'Date'), ('valid_until', 'Valid-Until')]:
             if release[field] != expected[key]:
                 raise ValueError('snapshot release mismatch')
+
+
+def prepare(lock, evidence, metadata, keyring, output, go, vips, validator, modules, source, actual_base):
+    validate_tools(lock['build_tools'])
+    if lock['platform'] != 'linux/amd64' or lock['builder_image'] != BASE or lock['runtime_image'] != BASE:
+        raise ValueError('unexpected platform or base')
+    config = lock['build']
+    if (config['configure'] != CONFIGURE or config['cflags'] != ['-g', '-O3']
+            or config['cxxflags'] != ['-D_GLIBCXX_USE_CXX11_ABI=0', '-g', '-O3']
+            or config['go_flags'] != ['-trimpath'] or config['module_mode'] != 'readonly'):
+        raise ValueError('unexpected build configuration')
+    validate_lock_cli(validator, lock['_path'])
+    for name in ('go.mod', 'go.sum'):
+        if hashlib.sha256((source / name).read_bytes()).hexdigest() != config[name.replace('.', '_') + '_sha256']:
+            raise ValueError('module file hash mismatch')
+    tool = lock['go_toolchain']
+    if tool != {'version': '1.20.14', 'url': 'https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz', 'size': 100448992, 'sha256': GO_SHA256}:
+        raise ValueError('unexpected Go pin')
+    verify_blob(go.read_bytes(), tool['size'], GO_SHA256)
+    blob = vips.read_bytes()
+    if lock['libvips'] != {'version': '8.10.0', 'archive_url': VIPS_URL, 'archive_sha256': VIPS_SHA256} or hashlib.sha256(blob).hexdigest() != VIPS_SHA256:
+        raise ValueError('vips digest mismatch')
+    if output.exists():
+        raise ValueError('output already exists')
+    validate_snapshot_pins(lock, metadata, keyring)
     indexes = closure.authenticated_indexes(metadata, keyring)
     validate_base_inventory(evidence, actual_base)
     packages = validate_closure(evidence, indexes, lock, compare_versions)

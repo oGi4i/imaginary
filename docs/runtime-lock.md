@@ -5,7 +5,10 @@ structural description of inputs, not authentication, build authorization,
 feature equivalence or evidence of reproducibility. The source-lock parser also
 accepts schema 1 for compatibility; schema 1 is not a build contract.
 Source, tree, recipe and workflow provenance belongs in external evidence, not
-in the lock that those objects contain.
+in the lock that those objects contain. The source-only discovery verifier can
+propose package fields after authenticating a pinned closure replay. Its artifact
+is unqualified and does not modify the tracked lock; hosted success and review
+are still required.
 
 All keys are required. Unknown or duplicate keys, case variants, trailing data,
 invalid UTF-8 and inputs over 1 MiB are rejected. A top-level nullable input is

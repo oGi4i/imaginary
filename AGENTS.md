@@ -61,6 +61,10 @@ bounded to validated public identities and must not echo raw errors. The pure lo
 mapper resolves requested roots to concrete installed names using raw `Provides`;
 the build preparer checks requests against source-owned roots and independently
 resolves them from authenticated package rows. Neither step claims an APT choice.
+A separate source-only verifier is proposed in the discovery job. It requires
+an exact pinned closure replay and authenticates package evidence before it
+publishes an unqualified candidate lock and identity-bound report. Its mocked
+tests do not establish hosted success or authorize tracked lock population.
 
 The locked offline recipe and context preparer are source-only build preparation;
 see `docs/runtime-build.md`. The separate two-build experiment workflow fails
