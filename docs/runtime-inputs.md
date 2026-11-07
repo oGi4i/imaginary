@@ -59,14 +59,15 @@ DAC_OVERRIDE, FOWNER, SETUID and SETGID for package ownership and APT privilege
 separation. They have no host mounts or credentials; reference probes and serving
 workload security settings remain unchanged.
 
-For an ambiguous dependency provider, CI may emit `graph_conflict` JSON with the
-validated public source package identity, dependency field, at most eight parsed
-alternatives and eight distinct provider identities. Counts and truncation flags
-identify omitted entries. The complete diagnostic is capped at 4 KiB; malformed
-or oversized identity fields suppress the details rather than echoing raw data.
-No paths, URLs, credentials or raw errors are included. Signed-index rematching
-establishes the metadata source; string validation alone does not authenticate it.
-This output does not select a provider, weaken graph checks or produce a closure.
+For each dependency group, closure evidence records every distinct installed
+provider that satisfies an alternative, sorted by package identity. Multiple paths
+to one provider produce one edge with the first matching alternative as its witness.
+This evidence does not claim which provider APT selected. Missing providers and
+invalid relations, versions or architecture constraints still fail. Signed-index
+rematching establishes the metadata source; string validation alone does not
+authenticate it. Compatibility `graph_conflict` diagnostics retain at most eight
+alternatives/providers and a 4 KiB total limit. They contain only validated public
+identities and exclude paths, URLs, credentials and raw errors.
 
 The separate reference job inventories the public reference image. Reference
 features and candidate images remain unqualified, and the discovery job ends

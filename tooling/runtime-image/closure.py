@@ -535,7 +535,7 @@ def relations(package):
 
 
 def resolve_edges(rows, compare):
-    """Resolve each dependency against installed packages; ambiguous groups fail."""
+    """Record every installed provider satisfying each dependency group."""
     packages = [row['package'] for row in rows]
     providers = {}
     for package in packages:
@@ -573,23 +573,14 @@ def resolve_edges(rows, compare):
                         candidates.setdefault(identity, (candidate, name, version, alternative))
                 if not candidates:
                     raise GraphError('missing_provider')
-                if len(candidates) != 1:
-                    conflict = {
-                        'source': {'name': package['Package'], 'version': package['Version'],
-                                   'architecture': package['Architecture']},
-                        'field': field, 'alternatives': group[:8],
-                        'providers': [{'name': name, 'version': version, 'architecture': architecture}
-                                      for name, version, architecture in sorted(candidates)[:8]],
-                        'alternative_count': len(group), 'provider_count': len(candidates),
-                        'truncated': len(group) > 8 or len(candidates) > 8}
-                    raise GraphError('ambiguous_provider', conflict)
-                candidate, name, version, choice = next(iter(candidates.values()))
-                edges.append({'source': {'name': package['Package'], 'version': package['Version'],
-                                         'architecture': package['Architecture']},
-                              'field': field, 'alternatives': group, 'choice': choice,
-                              'provider': {'name': candidate['Package'], 'version': candidate['Version'],
-                                           'architecture': candidate['Architecture']},
-                              'via': name, 'provided_version': version})
+                for identity in sorted(candidates):
+                    candidate, name, version, choice = candidates[identity]
+                    edges.append({'source': {'name': package['Package'], 'version': package['Version'],
+                                             'architecture': package['Architecture']},
+                                  'field': field, 'alternatives': group, 'choice': choice,
+                                  'provider': {'name': candidate['Package'], 'version': candidate['Version'],
+                                               'architecture': candidate['Architecture']},
+                                  'via': name, 'provided_version': version})
     return edges
 
 

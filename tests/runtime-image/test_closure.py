@@ -570,7 +570,7 @@ class ClosureTest(unittest.TestCase):
             self.assertIsInstance(failure.exception.__cause__, PermissionError)
             self.assertFalse(path.exists())
 
-    def test_resolved_edges_reject_missing_and_ambiguous(self):
+    def test_resolved_edges_reject_missing_and_include_all_providers(self):
         source = record('source')
         source['Depends'] = 'foo (>= 1:2~rc1) | virtual (>= 3)'
         foo = record('foo', '1:2', 'amd64')
@@ -585,8 +585,8 @@ class ClosureTest(unittest.TestCase):
             c.resolve_edges([{'package': source}], compare)
         provider = record('provider')
         provider.pop('Depends'); provider['Provides'] = 'virtual (= 4)'
-        with self.assertRaises(c.ClosureError):
-            c.resolve_edges(rows + [{'package': provider}], compare)
+        edges = c.resolve_edges(rows + [{'package': provider}], compare)
+        self.assertEqual([edge['provider']['name'] for edge in edges], ['foo', 'provider'])
         with self.assertRaises(c.ClosureError):
             c.resolve_edges(rows, lambda *args: False)
 
@@ -602,15 +602,37 @@ class ClosureTest(unittest.TestCase):
                 self.assertEqual(edges[0]['choice']['name'], dependency.split(' | ')[0])
                 self.assertEqual(len(edges[0]['alternatives']), 2)
 
-    def test_distinct_provider_identities_remain_ambiguous(self):
+    def test_distinct_provider_identities_are_sorted(self):
         source = record('source'); source.pop('Provides')
         foo = record('foo'); foo.pop('Depends'); foo['Provides'] = 'virtual'
         bar = record('bar'); bar.pop('Depends'); bar['Provides'] = 'virtual'
         for dependency in ('foo | bar', 'virtual'):
             source['Depends'] = dependency
-            with self.subTest(dependency=dependency), self.assertRaises(c.GraphError) as caught:
-                c.resolve_edges([{'package': source}, {'package': foo}, {'package': bar}], lambda *args: True)
-            self.assertEqual(caught.exception.reason, 'ambiguous_provider')
+            with self.subTest(dependency=dependency):
+                edges = c.resolve_edges([{'package': source}, {'package': foo}, {'package': bar}], lambda *args: True)
+                self.assertEqual([edge['provider']['name'] for edge in edges], ['bar', 'foo'])
+                self.assertEqual(edges, c.resolve_edges([{'package': source}, {'package': bar}, {'package': foo}], lambda *args: True))
+
+    def test_libice_direct_and_virtual_overlap(self):
+        source = record('libice-dev'); source.pop('Provides')
+        source['Depends'] = 'x11proto-core-dev'
+        direct = record('x11proto-core-dev'); direct.pop('Depends'); direct.pop('Provides')
+        virtual = record('x11proto-dev'); virtual.pop('Depends'); virtual['Provides'] = 'x11proto-core-dev'
+        edges = c.resolve_edges([{'package': p} for p in (source, virtual, direct)], lambda *args: True)
+        self.assertEqual([e['provider']['name'] for e in edges], ['x11proto-core-dev', 'x11proto-dev'])
+        self.assertEqual([e['choice']['name'] for e in edges], ['x11proto-core-dev', 'x11proto-core-dev'])
+
+    def test_versioned_virtual_and_multiarch_constraints(self):
+        source = record('source'); source.pop('Provides')
+        source['Depends'] = 'virtual:any (>= 2)'
+        good = record('good'); good.pop('Depends'); good['Provides'] = 'virtual (= 3)'; good['Multi-Arch'] = 'allowed'
+        old = record('old'); old.pop('Depends'); old['Provides'] = 'virtual (= 1)'; old['Multi-Arch'] = 'allowed'
+        unversioned = record('unversioned'); unversioned.pop('Depends'); unversioned['Provides'] = 'virtual'; unversioned['Multi-Arch'] = 'allowed'
+        wrong_arch = record('wrong-arch'); wrong_arch.pop('Depends'); wrong_arch['Provides'] = 'virtual (= 3)'
+        rows = [{'package': p} for p in (source, good, old, unversioned, wrong_arch)]
+        edges = c.resolve_edges(rows, lambda left, op, right: int(left) >= int(right))
+        self.assertEqual([e['provider']['name'] for e in edges], ['good'])
+        self.assertEqual(edges[0]['provided_version'], '3')
 
     def test_graph_conflict_exposes_only_bounded_validated_identities(self):
         source = record('source', '1:2-3'); source.pop('Provides')
@@ -620,7 +642,12 @@ class ClosureTest(unittest.TestCase):
         with self.assertRaises(c.DiagnosticError) as caught:
             try:
                 with c.stage('graph', 'build'):
-                    c.resolve_edges([{'package': p} for p in (source, foo, bar)], lambda *args: True)
+                    raise c.GraphError('ambiguous_provider', {
+                        'source': {'name': 'source', 'version': '1:2-3', 'architecture': 'amd64'},
+                        'field': 'Depends', 'alternatives': c.relations(source)['Depends'][0],
+                        'providers': [{'name': 'foo', 'version': '1', 'architecture': 'amd64'},
+                                      {'name': 'bar', 'version': '2', 'architecture': 'amd64'}],
+                        'alternative_count': 2, 'provider_count': 2, 'truncated': False})
             finally:
                 with c.cleanup_stage('build'):
                     pass
@@ -673,7 +700,12 @@ class ClosureTest(unittest.TestCase):
             providers.append(provider)
         with self.assertRaises(c.DiagnosticError) as caught:
             with c.stage('graph', 'runtime'):
-                c.resolve_edges([{'package': p} for p in [source] + providers], lambda *args: True)
+                raise c.GraphError('ambiguous_provider', {
+                    'source': {'name': 'source', 'version': '1', 'architecture': 'amd64'},
+                    'field': 'Pre-Depends', 'alternatives': c.relations(source)['Pre-Depends'][0][:8],
+                    'providers': [{'name': p['Package'], 'version': p['Version'], 'architecture': p['Architecture']}
+                                  for p in providers[:8]],
+                    'alternative_count': 20, 'provider_count': 20, 'truncated': True})
         message = c.diagnostic_message(caught.exception)
         conflict = json.loads(message.split('\ngraph_conflict=', 1)[1])
         self.assertEqual((conflict['alternative_count'], conflict['provider_count']), (20, 20))
@@ -698,10 +730,8 @@ class ClosureTest(unittest.TestCase):
         foo = record('foo'); foo.pop('Depends'); foo.pop('Provides')
         bar = record('bar'); bar.pop('Depends'); bar.pop('Provides')
         malformed = dict(source, Depends='bad ()')
-        ambiguous = dict(source, Depends='foo | bar')
         for rows, reason in [([{'package': malformed}], 'invalid_relation'),
-                             ([{'package': source}], 'missing_provider'),
-                             ([{'package': ambiguous}, {'package': foo}, {'package': bar}], 'ambiguous_provider')]:
+                             ([{'package': source}], 'missing_provider')]:
             with self.subTest(reason=reason), self.assertRaises(c.DiagnosticError) as caught:
                 with c.stage('graph', 'build'):
                     c.resolve_edges(rows, lambda *args: True)

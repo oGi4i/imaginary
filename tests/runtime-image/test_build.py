@@ -1,3 +1,5 @@
+import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -38,6 +40,50 @@ class BuildPreparationTests(unittest.TestCase):
         with unittest.mock.patch.object(build.closure, 'resolve_edges', return_value=[{'source': {'name': 'a'}, 'provider': {'name': 'b'}}]):
             with self.assertRaisesRegex(ValueError, 'dependency'):
                 build.validate_edges([], [], lambda *args: True)
+
+    def test_authenticated_complete_provider_evidence_and_lock_union(self):
+        packages = []
+        for name in ('a', 'b', 'c'):
+            pkg = {'Package': name, 'Version': '1', 'Architecture': 'amd64',
+                   'Filename': 'pool/' + name + '.deb', 'Size': '4',
+                   'SHA256': hashlib.sha256(b'data').hexdigest()}
+            if name == 'a':
+                pkg['Depends'] = 'b | c'
+            packages.append(pkg)
+        indexes = [('main', packages)]
+        post = [[p['Package'], p['Version'], p['Architecture']] for p in packages]
+        rows = build.closure.match_installed(post, indexes)
+        given = []
+        locks = []
+        for row in rows:
+            pkg = row['package']; name = pkg['Package']
+            url = build.closure.archive_root('main') + pkg['Filename']
+            given.append(dict(row, artifact_url=url, relations=build.closure.relations(pkg)))
+            locks.append({'name': name, 'version': '1', 'architecture': 'amd64',
+                          'repository': 'main', 'url': url, 'size': 4, 'sha256': pkg['SHA256'],
+                          'provenance': 'base', 'dependencies': ['b', 'c'] if name == 'a' else []})
+        edges = build.closure.resolve_edges(rows, lambda *args: True)
+        part = {'post': post, 'base': post, 'pre': post, 'roots': ['a'],
+                'packages': given, 'dependency_edges': edges}
+        document = {'schema_version': 1, 'platform': 'linux/amd64', 'base_manifest': build.discovery.BASE,
+                    'closures': {'build': copy.deepcopy(part), 'runtime': copy.deepcopy(part)}}
+        lock = {'build_roots': ['a'], 'runtime_roots': ['a'],
+                'build_packages': copy.deepcopy(locks), 'runtime_packages': copy.deepcopy(locks)}
+        build.validate_closure(document, indexes, lock, lambda *args: True)
+        mutations = [lambda e: e.pop(), lambda e: e.append(copy.deepcopy(e[0])),
+                     lambda e: e[0]['provider'].update(name='a'),
+                     lambda e: e[0]['provider'].update(version='2'),
+                     lambda e: e[0].update(via='c'),
+                     lambda e: e.append(dict(copy.deepcopy(e[0]), field='Pre-Depends'))]
+        for mutate in mutations:
+            changed = copy.deepcopy(document)
+            mutate(changed['closures']['build']['dependency_edges'])
+            with self.subTest(mutate=mutate), self.assertRaises(ValueError):
+                build.validate_closure(changed, indexes, lock, lambda *args: True)
+        incomplete = copy.deepcopy(lock)
+        incomplete['build_packages'][0]['dependencies'].pop()
+        with self.assertRaisesRegex(ValueError, 'dependencies'):
+            build.validate_closure(document, indexes, incomplete, lambda *args: True)
 
     def test_download_refuses_untrusted_url(self):
         with self.assertRaisesRegex(ValueError, 'URL'):

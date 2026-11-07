@@ -67,6 +67,8 @@ unresolved. Discovery evidence is not itself a package closure or qualification.
 
 `tooling/runtime-image/populate_lock.py` provides a pure transformation of
 closure evidence into a new lock object; it does not access files, authenticate
-metadata, or authorize a build. It records `base` when the exact identity appears
-in the base inventory, not as proof of the original installed deb. The consumer
-must independently authenticate indexes and recompute package matches and edges.
+metadata, or authorize a build. It maps all recorded provider edges to the sorted
+union of provider names for each source. It records `base` when the exact identity
+appears in the base inventory, not as proof of the original installed deb. The
+consumer must independently authenticate indexes, recompute package matches and
+complete edges, and compare the provider-name union with the lock.

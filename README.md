@@ -61,8 +61,8 @@ not produce a candidate image or establish reproducibility. Its independent
 available parsed package/native observations; missing tools leave evidence
 incomplete. Its closure step resolves separate build/runtime package inventories
 using verified metadata and payloads in network-disabled CI containers. Until
-that step succeeds, no complete package closure is recorded. Bounded public
-conflict diagnostics identify competing dependency providers without selecting one;
+that step succeeds, no complete package closure is recorded. Dependency edges
+record every distinct installed satisfying provider, not an APT provider choice;
 see [runtime-input discovery](docs/runtime-inputs.md).
 The [offline recipe and preparer](docs/runtime-build.md) and
 [two-build experiment](docs/runtime-image-ci.md) are source preparation, not

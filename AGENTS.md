@@ -54,9 +54,10 @@ actual closure evidence requires CI success and is not image reproducibility.
 Only disposable offline package containers add CHOWN, DAC_OVERRIDE, FOWNER, SETUID
 and SETGID to the otherwise dropped capability set so APT can retain its sandbox.
 Reference probes and serving workloads do not inherit those build capabilities.
-Ambiguous-provider diagnostics expose only bounded validated public package and
-relation identities (at most eight alternatives/providers, 4 KiB total). They
-must not echo raw errors or change the fail-ambiguous provider policy.
+Record all distinct installed providers that satisfy each dependency group, in
+identity order, with the first matching alternative as a witness, not an APT
+choice. Missing or invalid providers still fail. Compatibility diagnostics stay
+bounded to validated public identities and must not echo raw errors.
 
 The locked offline recipe and context preparer are source-only build preparation;
 see `docs/runtime-build.md`. The separate two-build experiment workflow fails

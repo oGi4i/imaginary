@@ -11,7 +11,9 @@ keyring size. Preparation must fail until those inputs are established.
 the supplied commit and tree. The output must be a new path outside that tree.
 The helper uses the tracked commit archive, checks the recipe and workflow
 hashes, verifies the official Go payload, authenticates snapshot indexes and
-compares package closures with the base inventory and lock. It obtains modules
+compares package closures with the base inventory and lock. It recomputes all
+satisfying provider edges from authenticated packages and checks the complete
+provider-name union against lock dependencies. It obtains modules
 using the verified Go toolchain with `go.sum` verification and read-only module
 files. The context uses normalized timestamps and an offline Dockerfile.
 

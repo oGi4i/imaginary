@@ -60,9 +60,19 @@ class PopulateLockTests(unittest.TestCase):
             part['dependency_edges'].append({'source': {'name': 'a', 'version': '1', 'architecture': 'amd64'},
                  'provider': {'name': 'b', 'version': '1', 'architecture': 'amd64'},
                  'field': 'Depends', 'alternatives': [], 'choice': {}, 'via': 'b', 'provided_version': '1'})
+            item = copy.deepcopy(item)
+            item['package'].update(Package='c', Filename='pool/c.deb')
+            item['origins'][0]['filename'] = 'pool/c.deb'
+            item['artifact_url'] = item['artifact_url'].replace('b.deb', 'c.deb')
+            part['packages'].append(item)
+            part['post'].append(['c', '1', 'amd64'])
+            edge = copy.deepcopy(part['dependency_edges'][0])
+            edge['provider']['name'] = 'c'
+            part['dependency_edges'].extend([edge, copy.deepcopy(edge)])
         result = MODULE.populate(lock, doc)
-        self.assertEqual(result['build_packages'][0]['dependencies'], ['b'])
-        self.assertEqual(result['build_packages'][1]['provenance'], 'snapshot')
+        for kind in ('build', 'runtime'):
+            self.assertEqual(result[kind + '_packages'][0]['dependencies'], ['b', 'c'])
+            self.assertEqual(result[kind + '_packages'][1]['provenance'], 'snapshot')
 
     def test_upgraded_base_package_is_not_marked_base(self):
         lock, doc = fixture()
