@@ -131,13 +131,10 @@ class ImageTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()
         self.assertIn('cp "$RUNNER_TEMP/runtime-context/context-manifest.json" "$RUNNER_TEMP/evidence/artifact/context-manifest.json"', workflow)
 
-    def test_workflow_blocks_builder_execution(self):
+    def test_workflow_requires_builder_contract(self):
         workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()
-        gate = workflow.index('name: Block runtime image execution')
-        discovery = workflow.index('name: Discover verified inputs')
-        self.assertLess(gate, discovery)
-        self.assertIn('exit 1', workflow[gate:discovery])
-        self.assertNotIn('if: always()', workflow[gate:discovery])
+        self.assertLess(workflow.index('builder_policy.py preflight'),
+                        workflow.index('docker buildx build --builder "$builder" --platform linux/amd64 --target runtime'))
 
     def test_workflow_container_cleanup_contract(self):
         workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()

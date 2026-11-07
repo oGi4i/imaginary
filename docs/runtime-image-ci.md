@@ -1,20 +1,23 @@
 # Runtime image experiment CI
 
-`.github/workflows/runtime-image.yml` is an unqualified, branch-only draft.
-**Execution is blocked:** an unconditional failing step prevents Docker input
-collection and image builds. The proposed `docker-container` BuildKit driver has
-no rootless or capability constraint in this workflow. Its daemon privilege and
-build `RUN` capabilities have not been approved; the five approved capabilities
-for disposable APT closure containers do not approve this builder. A separate
-privilege disposition and source review are required before removing the gate.
+`.github/workflows/runtime-image.yml` defines an unqualified branch-only experiment.
+The user approved two independent artifact-only builds on disposable GitHub-hosted
+VMs. Each uses a privileged pinned BuildKit daemon, a named state volume and a
+remote Buildx driver over Docker exec and the daemon's local Unix socket. The
+daemon has no published port, host bind or Docker socket mount. The workflow checks
+the actual daemon configuration and a network-disabled nested RUN before the
+candidate build. A mismatch stops the job. The RUN contract permits the default
+14 capabilities, UID 0, and NoNewPrivileges 0; seccomp must be active. AppArmor
+state is recorded from a bounded allowlist, not assumed to be Docker's profile.
 
-The draft does not push a registry image or deploy. If approved and corrected, it
-is intended to use two independent hosted runners without shared caches, upload
-one OCI artifact per build, and compare content-addressed objects in a third job.
-An OCI artifact is not a registry image, production approval or a memory bound.
+The disposable VM is the security boundary. A compromised build may control the
+VM and its ephemeral GitHub credentials. The experiment has no private credentials,
+registry publication or cluster access. It uploads one OCI artifact per build and
+compares content-addressed objects in a third job. An artifact is not production
+approval or a memory bound. Actual CI execution of this implementation is pending.
 
-The remaining description is the proposed path, not evidence of execution or
-completed review. The lock now contains the reviewed authenticated package
+The remaining description is the proposed path, not evidence of execution. The
+lock now contains the reviewed authenticated package
 closures. `features` remains null, and preparation still requires its other
 inputs and checks. Discovery output alone is not approval. The workflow extracts the keyring from the digest-pinned base, resolves
 closures, then passes those files to `build.py`. Preparation binds the clean

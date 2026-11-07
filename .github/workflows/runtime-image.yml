@@ -33,10 +33,6 @@ jobs:
           ref: ${{ github.sha }}
       - name: Test offline helpers
         run: python3 -I -B -m unittest discover -s tests/runtime-image -v
-      - name: Block runtime image execution
-        run: |
-          echo 'Runtime image build is blocked pending a builder privilege disposition.' >&2
-          exit 1
       - name: Discover verified inputs and package closures
         shell: bash
         run: |
@@ -98,6 +94,8 @@ jobs:
           set -euo pipefail
           export DOCKER_CONFIG="$RUNNER_TEMP/docker-config"
           builder="runtime-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          daemon="${builder}-daemon"
+          state="${daemon}-state"
           tag="runtime-experiment:${{ matrix.replica }}"
           container="runtime-test-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           verification="runtime-verification-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -127,20 +125,62 @@ jobs:
             names=$(timeout -k 10 30 docker buildx ls --format '{{.Name}}') || return 1
             ! printf '%s\n' "$names" | cut -d' ' -f1 | grep -Fxq "$builder"
           }
+          cleanup_daemon() {
+            local names volumes status=0
+            names=$(timeout -k 10 30 docker ps -a --filter "name=^/${daemon}$" --format '{{.Names}}') || return 1
+            if [ -n "$names" ]; then
+              if [ "$names" = "$daemon" ]; then timeout -k 10 30 docker rm -f "$daemon" || status=1; else status=1; fi
+            fi
+            names=$(timeout -k 10 30 docker ps -a --filter "name=^/${daemon}$" --format '{{.Names}}') || return 1
+            [ -z "$names" ] || status=1
+            volumes=$(timeout -k 10 30 docker volume ls --filter "name=^${state}$" --format '{{.Name}}') || return 1
+            if [ -n "$volumes" ]; then
+              if [ "$volumes" = "$state" ]; then timeout -k 10 30 docker volume rm "$state" || status=1; else status=1; fi
+            fi
+            volumes=$(timeout -k 10 30 docker volume ls --filter "name=^${state}$" --format '{{.Name}}') || return 1
+            [ -z "$volumes" ] || status=1
+            if timeout -k 10 30 docker volume inspect "$state" > /dev/null 2>&1; then status=1; fi
+            return "$status"
+          }
           cleanup() {
             local status=$?
             trap - EXIT
             cleanup_containers || status=1
             cleanup_builder || status=1
+            cleanup_daemon || status=1
             exit "$status"
           }
+          test -z "$(timeout -k 10 30 docker ps -a --filter "name=^/${daemon}$" --format '{{.Names}}')"
+          test -z "$(timeout -k 10 30 docker volume ls --filter "name=^${state}$" --format '{{.Name}}')"
+          existing_builders=$(timeout -k 10 30 docker buildx ls --format '{{.Name}}')
+          if printf '%s\n' "$existing_builders" | cut -d' ' -f1 | grep -Fxq "$builder"; then exit 1; fi
           trap cleanup EXIT
           python3 -I -c 'import json; d=json.load(open("docs/runtime-image.lock.yaml"))["build_tools"]; assert d["syft"] == {"url":"https://github.com/anchore/syft/releases/download/v1.20.0/syft_1.20.0_linux_amd64.tar.gz","size":17966142,"sha256":"689e12c5cbf67521ce61b9c126068f9eaabe1223e77971b2fede50033ff6b5cc"}; assert {a["name"]:a["commit"] for a in d["actions"]}["download-artifact"] == "d3f86a106a0bac45b974a628896c90dbdf5c8093"'
-          timeout -k 10 300 docker buildx create --name "$builder" --driver docker-container --driver-opt image=docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75 --use
+          python3 -I -B tooling/runtime-image/builder_policy.py identity
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git hash-object tooling/runtime-image/builder_policy.py)" = "$(git rev-parse "$GITHUB_SHA:tooling/runtime-image/builder_policy.py")"
+          image='docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75'
+          timeout -k 10 300 docker pull --platform linux/amd64 "$image"
+          timeout -k 10 30 docker volume create "$state"
+          timeout -k 10 30 docker create --name "$daemon" --platform linux/amd64 --privileged --network bridge --memory 4g --cpus 2 --pids-limit 1024 --mount "type=volume,src=$state,dst=/var/lib/buildkit" --entrypoint /usr/bin/buildkitd "$image" --config /dev/null --cdi-disabled
+          timeout -k 10 30 docker start "$daemon"
+          timeout -k 10 30 docker inspect "$daemon" > "$RUNNER_TEMP/evidence/daemon-inspect.json"
+          python3 -I -B tooling/runtime-image/builder_policy.py daemon --input "$RUNNER_TEMP/evidence/daemon-inspect.json" --name "$daemon" --volume "$state"
+          timeout -k 10 300 docker buildx create --name "$builder" --driver remote "docker-container://$daemon"
           timeout -k 10 300 docker buildx inspect "$builder" --bootstrap > "$RUNNER_TEMP/evidence/artifact/builder-inspect.txt"
           docker buildx version > "$RUNNER_TEMP/evidence/artifact/buildx-version.txt"
-          docker inspect "buildx_buildkit_${builder}0" --format '{{.Config.Image}}' | tee "$RUNNER_TEMP/evidence/artifact/buildkit-image.txt"
-          test "$(docker inspect "buildx_buildkit_${builder}0" --format '{{.Config.Image}}')" = 'docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75'
+          mkdir "$RUNNER_TEMP/preflight" "$RUNNER_TEMP/preflight-output"
+          printf '%s\n' \
+            '# syntax=docker.io/docker/dockerfile:1.9.0@sha256:dc9e236567481e0aca4c1f52351af213b9a176622f10e3f4a86e5cc48919fa01' \
+            'FROM debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a AS probe' \
+            'RUN --network=none mkdir /evidence && { awk '\''/^(Uid|CapEff|CapPrm|CapBnd|CapInh|CapAmb|NoNewPrivs|Seccomp):/ {print}'\'' /proc/self/status; printf "interfaces: "; ls /sys/class/net | tr "\\n" " "; printf "\\napparmor: "; cat /proc/self/attr/current; } > /evidence/contract' \
+            'FROM scratch' \
+            'COPY --from=probe /evidence/contract /contract' > "$RUNNER_TEMP/preflight/Dockerfile"
+          timeout -k 10 300 docker buildx build --builder "$builder" --platform linux/amd64 --no-cache --provenance=false --sbom=false --output "type=local,dest=$RUNNER_TEMP/preflight-output" "$RUNNER_TEMP/preflight"
+          test "$(ls -A "$RUNNER_TEMP/preflight-output")" = contract
+          python3 -I -B tooling/runtime-image/builder_policy.py preflight --input "$RUNNER_TEMP/preflight-output/contract" --name "$daemon" --report "$RUNNER_TEMP/evidence/artifact/builder-policy.json"
+          timeout -k 10 30 docker inspect "$daemon" > "$RUNNER_TEMP/evidence/daemon-inspect.json"
+          python3 -I -B tooling/runtime-image/builder_policy.py daemon --input "$RUNNER_TEMP/evidence/daemon-inspect.json" --name "$daemon" --volume "$state"
           epoch=$(python3 -I -c 'import json; print(json.load(open("docs/runtime-image.lock.yaml"))["build"]["source_date_epoch"])')
           case "$epoch" in ''|*[!0-9]*) exit 1;; esac
           timeout -k 10 3600 docker buildx build --builder "$builder" --platform linux/amd64 --target runtime --no-cache --provenance=false --sbom=false --build-arg "SOURCE_DATE_EPOCH=$epoch" --output "type=oci,dest=$RUNNER_TEMP/evidence/artifact/image.oci.tar,name=$tag,rewrite-timestamp=true" "$RUNNER_TEMP/runtime-context"

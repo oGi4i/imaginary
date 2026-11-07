@@ -70,11 +70,12 @@ The verifier never automatically modifies the tracked lock. This evidence covers
 only the package closure; features remain null and memory remains unqualified.
 
 The locked offline recipe and context preparer are source-only build preparation;
-see `docs/runtime-build.md`. The separate two-build experiment workflow fails
-before Docker or tool acquisition until the BuildKit daemon and RUN privilege
-contract is resolved; see `docs/runtime-image-ci.md`. Do not remove that gate
-based only on pinned-tool approval. Source tests and builder feature evidence
-cannot establish runtime/reference loader parity or qualify memory.
+see `docs/runtime-build.md`. The two-build experiment uses an approved privileged
+pinned BuildKit daemon on disposable GitHub-hosted VMs and checks the daemon and
+nested RUN contract before building; see `docs/runtime-image-ci.md`. The VM is
+its security boundary, not the privileged daemon. Actual CI execution is pending.
+Source tests and builder feature evidence cannot establish runtime/reference
+loader parity or qualify memory.
 
 ## Verification and limits
 
