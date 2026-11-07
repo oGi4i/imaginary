@@ -190,6 +190,23 @@ class ClosureTest(unittest.TestCase):
             with self.assertRaises(c.ClosureError):
                 c.authenticated_indexes({'snapshot': {}}, Path(directory) / 'key')
 
+    def test_apt_configure_diagnostics_allow_only_fixed_markers(self):
+        self.assertIsNone(c.configure_result(b'APT_RESULT=ok\n'))
+        for reason in c.APT_REASONS:
+            with self.subTest(reason=reason), self.assertRaises(c.DiagnosticError) as caught:
+                with c.stage('configure', 'build'):
+                    c.configure_result(('APT_RESULT=' + reason + '\n').encode())
+            self.assertEqual(c.diagnostic_message(caught.exception),
+                             f'closure failure stage=configure kind=build category=closure_error reason={reason} cleanup=not_attempted')
+        for output in (b'APT_RESULT=ok\nsecret', b'private path', b'APT_RESULT=secret\n', b''):
+            with self.subTest(output=output), self.assertRaises(c.ClosureError):
+                c.configure_result(output)
+        self.assertNotIn('ulimit -f', c.CONFIGURE)
+        self.assertIn('mkfifo', c.CONFIGURE)
+        self.assertIn('dd bs=1M count=1 iflag=fullblock', c.CONFIGURE)
+        self.assertIn('[ -s \"$log.overflow\" ]', c.CONFIGURE)
+        self.assertNotIn('allow-unauthenticated', c.CONFIGURE)
+
     def test_collection_orchestration_uses_isolated_independent_roots(self):
         base = [('example', '1', 'amd64')]
         new = record('new', '2', 'all')
@@ -210,6 +227,8 @@ class ClosureTest(unittest.TestCase):
                     if self.inventories[args[2]] == 3:
                         text += 'ii \tnew\t2\tall\n'
                     return text.encode()
+                if args[1] == 'exec' and args[-1] == c.CONFIGURE:
+                    return b'APT_RESULT=ok\n'
                 if args[1] == 'exec' and args[-1].startswith(c.SIMULATE):
                     return b'Inst new (2 Debian [all])\n'
                 return b''

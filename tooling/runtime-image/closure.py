@@ -43,6 +43,18 @@ AUTH_REASONS = frozenset(('mismatched_snapshot', 'unexpected_index_identity',
                           'base_invalid'))
 
 
+APT_REASONS = frozenset(('missing_key', 'invalid_signature', 'missing_release', 'not_found',
+                         'compression', 'permission', 'unsupported_method', 'unknown'))
+
+
+class AptConfigureError(ClosureError):
+    def __init__(self, reason):
+        if reason not in APT_REASONS:
+            raise ValueError('invalid APT diagnostic')
+        super().__init__('APT configure rejected')
+        self.reason = reason
+
+
 class AuthIndexError(ClosureError):
     def __init__(self, reason):
         if reason not in AUTH_REASONS:
@@ -65,8 +77,9 @@ class DiagnosticError(Exception):
         if (where not in STAGES or kind not in KINDS or category not in CATEGORIES
                 or cleanup not in CLEANUP_STATES or (code is not None and
                 (category != 'command_exit' or type(code) is not int or not 1 <= code <= 255))
-                or (reason is not None and (where != 'auth_index' or category != 'closure_error'
-                                            or reason not in AUTH_REASONS))):
+                or (reason is not None and (category != 'closure_error' or not (
+                    where == 'auth_index' and reason in AUTH_REASONS
+                    or where == 'configure' and reason in APT_REASONS)))):
             raise ValueError('invalid diagnostic')
         super().__init__('closure operation failed')
         self.where, self.kind, self.category, self.code, self.cleanup = where, kind, category, code, cleanup
@@ -121,8 +134,11 @@ def stage(where, kind='none'):
     except Exception as exc:
         category, code = classify(exc)
         cleanup = 'failed' if getattr(exc, '_closure_cleanup_failed', False) else 'not_attempted'
-        reason = exc.reason if (where == 'auth_index' and type(exc) is AuthIndexError
-                                and exc.reason in AUTH_REASONS) else None
+        reason = None
+        if where == 'auth_index' and type(exc) is AuthIndexError and exc.reason in AUTH_REASONS:
+            reason = exc.reason
+        if where == 'configure' and type(exc) is AptConfigureError and exc.reason in APT_REASONS:
+            reason = exc.reason
         raise DiagnosticError(where, kind, category, code, cleanup, reason) from exc
 
 
@@ -497,7 +513,33 @@ CONFIGURE = ("set -eu; rm -f /etc/apt/sources.list.d/*; "
              "printf '%s\\n' 'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] file:/mirror/main buster main' "
              "'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] file:/mirror/security buster/updates main' > /etc/apt/sources.list; "
              "printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d; chmod 755 /usr/sbin/policy-rc.d; "
-             "apt-get " + APT_OPTIONS + " update")
+             "log=/tmp/runtime-closure-apt.log; pipe=/tmp/runtime-closure-apt.fifo; "
+             "mkfifo \"$pipe\"; "
+             "( dd bs=1M count=1 iflag=fullblock of=\"$log\" 2>/dev/null; "
+             "dd bs=1 count=1 of=\"$log.overflow\" 2>/dev/null; dd bs=64K of=/dev/null 2>/dev/null ) <\"$pipe\" & "
+             "reader=$!; status=0; apt-get " + APT_OPTIONS + " update >\"$pipe\" 2>&1 || status=$?; "
+             "wait \"$reader\"; rm -f \"$pipe\"; "
+             "if [ -s \"$log.overflow\" ]; then printf 'APT_RESULT=unknown\\n'; "
+             "elif [ \"$status\" -eq 0 ] && ! grep -Eq '^(W|E):' \"$log\"; then "
+             "printf 'APT_RESULT=ok\\n'; else "
+             "if grep -qi 'NO_PUBKEY' \"$log\"; then reason=missing_key; "
+             "elif grep -Eqi 'BADSIG|EXPKEYSIG|invalid signature|signatures were invalid' \"$log\"; then reason=invalid_signature; "
+             "elif grep -qi 'does not have a Release file' \"$log\"; then reason=missing_release; "
+             "elif grep -qi 'Permission denied' \"$log\"; then reason=permission; "
+             "elif grep -Eqi 'method.*(unsupported|not supported|could not be found)' \"$log\"; then reason=unsupported_method; "
+             "elif grep -Eqi 'decompress|unsupported compression|unsupported.*xz' \"$log\"; then reason=compression; "
+             "elif grep -Eqi 'File not found|No such file or directory|404[[:space:]]+Not Found' \"$log\"; then reason=not_found; "
+             "else reason=unknown; fi; printf 'APT_RESULT=%s\\n' \"$reason\"; fi; "
+             "rm -f \"$log\" \"$log.overflow\"")
+
+
+def configure_result(data):
+    if data == b'APT_RESULT=ok\n':
+        return
+    for reason in APT_REASONS:
+        if data == ('APT_RESULT=' + reason + '\n').encode('ascii'):
+            raise AptConfigureError(reason)
+    raise ClosureError('invalid APT diagnostic output')
 
 
 def write_mirror(directory, metadata):
@@ -609,7 +651,7 @@ def collect(document, temp, run):
                 write_mirror(mirror, document['snapshot'])
                 run(['docker', 'cp', str(mirror), name + ':/mirror'], timeout=60)
             with stage('configure', kind):
-                run(['docker', 'exec', name, '/bin/sh', '-c', CONFIGURE], timeout=180)
+                configure_result(run(['docker', 'exec', name, '/bin/sh', '-c', CONFIGURE], timeout=180))
             with stage('pre_inventory', kind):
                 pre = parse_inventory(run(['docker', 'exec', name, '/bin/sh', '-c', DPKG_QUERY], timeout=30))
                 if pre != base:
