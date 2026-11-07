@@ -34,7 +34,12 @@ only when enabled. See `docs/qualification-observation.md`.
 
 The strict JSON-compatible YAML runtime lock and source-lock CLI validate
 structure and report unresolved inputs. They do not authenticate the lock or
-build an image. See `docs/candidate-image.md`.
+build an image. See `docs/candidate-image.md`. The separate runtime-input
+metadata workflow and helpers are incomplete discovery preparation; see
+`docs/runtime-inputs.md`. Its tests use mocked public metadata locally. Actual
+input discovery and native reference inventory belong on GitHub-hosted runners,
+not local execution. Unknown package closures and feature evidence stay missing;
+a discovery artifact is not a locked or reproducible candidate image.
 
 ## Verification and limits
 

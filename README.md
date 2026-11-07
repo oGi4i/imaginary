@@ -52,6 +52,9 @@ include `X-Imaginary-Request-Sequence` only when qualification is enabled.
 The strict JSON-compatible YAML [runtime lock](docs/runtime-image.lock.yaml)
 and source-lock CLI validate structure and list unresolved inputs. They do not
 authenticate the lock or build an image; see [candidate image](docs/candidate-image.md).
+The separate [runtime-input discovery](docs/runtime-inputs.md) workflow is
+incomplete preparation for authenticated inputs and reference inventory. It does
+not produce a candidate image or establish reproducibility.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image

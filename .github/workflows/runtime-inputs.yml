@@ -1,0 +1,50 @@
+name: Runtime input discovery (incomplete)
+
+on:
+  push:
+    branches: [mitigate-native-memory]
+    paths:
+      - '.github/workflows/runtime-inputs.yml'
+      - 'tooling/runtime-image/**'
+      - 'tests/runtime-image/**'
+      - 'docs/runtime-inputs.md'
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test discovery helpers
+        run: python3 -I -m unittest discover -s tests/runtime-image -v
+      - name: Obtain official base archive keyring without starting it
+        run: |
+          set -eu
+          image='debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a'
+          docker pull --platform linux/amd64 "$image"
+          id=$(docker create --platform linux/amd64 "$image")
+          trap 'docker rm "$id"' EXIT
+          mkdir -p "$RUNNER_TEMP/runtime-inputs"
+          docker cp "$id:/usr/share/keyrings/debian-archive-keyring.gpg" "$RUNNER_TEMP/runtime-inputs/debian-archive-keyring.gpg"
+      - name: Verify public metadata
+        run: |
+          python3 -I tooling/runtime-image/discovery.py \
+            --keyring "$RUNNER_TEMP/runtime-inputs/debian-archive-keyring.gpg" \
+            --output "$RUNNER_TEMP/runtime-inputs/discovery.json"
+      - name: Upload discovery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-input-metadata
+          path: ${{ runner.temp }}/runtime-inputs/discovery.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Keep incomplete discovery fail-closed
+        run: |
+          echo 'Package closures and reference inventory are not yet collected.' >&2
+          exit 1
