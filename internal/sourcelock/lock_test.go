@@ -44,7 +44,7 @@ const completeV2 = `{
   "runtime_packages":[{"name":"a","version":"1","architecture":"amd64","repository":"main","url":"https://example.test/a.deb","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependencies":[],"provenance":"snapshot"}],
   "build_roots":["a"],"runtime_roots":["a"],
   "go_toolchain":{"version":"1.20.14","url":"https://example.test/go.tar.gz","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-  "build_tools":{"buildkit_image":"example.test/buildkit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","frontend_image":"example.test/frontend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","buildx":{"url":"https://example.test/buildx","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"actions":[{"name":"checkout","repository":"https://example.test/checkout","commit":"0123456789abcdef0123456789abcdef01234567"}]},
+  "build_tools":{"buildkit_image":"example.test/buildkit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","frontend_image":"example.test/frontend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","buildx":{"url":"https://example.test/buildx","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"syft":{"url":"https://example.test/syft","size":2,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"actions":[{"name":"checkout","repository":"https://example.test/checkout","commit":"0123456789abcdef0123456789abcdef01234567"}]},
   "build":{"go_mod_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","go_sum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_date_epoch":1,"configure":["--disable-debug"],"cflags":[],"cxxflags":[],"go_flags":[],"module_mode":"readonly"},
   "features":["jpeg"]
 }`
@@ -69,11 +69,11 @@ func TestCommittedV2LockIsIncomplete(t *testing.T) {
 		t.Fatalf("committed lock is invalid: %v", err)
 	}
 	for _, got := range missing {
-		if got == "snapshot.main.keyring.size" || got == "snapshot.security.keyring.size" || got == "build_tools" || strings.HasPrefix(got, "build_tools.") {
+		if got == "snapshot.main.keyring.size" || got == "snapshot.security.keyring.size" || got == "build_tools" || strings.HasPrefix(got, "build_tools.") || got == "build_roots" || got == "runtime_roots" || got == "build" {
 			t.Errorf("verified metadata unexpectedly unresolved: %s", got)
 		}
 	}
-	for _, name := range []string{"build_packages", "runtime_packages", "build_roots", "runtime_roots", "build", "features"} {
+	for _, name := range []string{"build_packages", "runtime_packages", "features"} {
 		found := false
 		for _, got := range missing {
 			if got == name {
@@ -98,6 +98,10 @@ func TestValidateV2(t *testing.T) {
 		{`https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz`, `https://example.test/other.tar.gz`},
 		{`20240408T000000Z`, `20249999T999999Z`},
 		{`example.test/base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, `debian/bookworm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`},
+		{`"syft":{"url":"https://example.test/syft","size":2,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},`, ``},
+		{`"syft":{"url":"https://example.test/syft","size":2,`, `"syft":{"url":"http://example.test/syft","size":2,`},
+		{`"size":2`, `"size":0`},
+		{`bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`, `bad-syft-sha`},
 		{`"size":1`, `"size":0`},
 		{`"architecture":"amd64"`, `"architecture":"arm64"`},
 		{`"dependencies":[]`, `"dependencies":["absent"]`},
