@@ -57,7 +57,10 @@ Reference probes and serving workloads do not inherit those build capabilities.
 Record all distinct installed providers that satisfy each dependency group, in
 identity order, with the first matching alternative as a witness, not an APT
 choice. Missing or invalid providers still fail. Compatibility diagnostics stay
-bounded to validated public identities and must not echo raw errors.
+bounded to validated public identities and must not echo raw errors. The pure lock
+mapper resolves requested roots to concrete installed names using raw `Provides`;
+the build preparer checks requests against source-owned roots and independently
+resolves them from authenticated package rows. Neither step claims an APT choice.
 
 The locked offline recipe and context preparer are source-only build preparation;
 see `docs/runtime-build.md`. The separate two-build experiment workflow fails

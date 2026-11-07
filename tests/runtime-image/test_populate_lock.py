@@ -48,6 +48,54 @@ class PopulateLockTests(unittest.TestCase):
             'url': doc['closures']['build']['packages'][0]['artifact_url'], 'size': 12,
             'sha256': HASH, 'dependencies': [], 'provenance': 'base'}])
 
+    def test_virtual_roots_resolve_raw_installed_provides(self):
+        lock, doc = fixture()
+        for kind, root in (('build', 'fftw3-dev'), ('runtime', 'fftw3')):
+            lock[kind + '_roots'] = [root]
+            part = doc['closures'][kind]
+            part['roots'] = [root]
+            row = part['packages'][0]
+            name = 'libfftw3-dev' if kind == 'build' else 'libfftw3-3'
+            row['package'].update(Package=name, Provides=root + ' (= 3.3.8-2)')
+            part['post'][0][0] = name
+        before = copy.deepcopy((lock, doc))
+        result = MODULE.populate(lock, doc)
+        self.assertEqual(result['build_roots'], ['libfftw3-dev'])
+        self.assertEqual(result['runtime_roots'], ['libfftw3-3'])
+        self.assertEqual(result, MODULE.populate(lock, doc))
+        self.assertEqual((lock, doc), before)
+
+    def test_root_resolver_precedence_multiple_and_invalid(self):
+        def row(name, provides=None):
+            package = {'Package': name, 'Version': '1', 'Architecture': 'amd64'}
+            if provides is not None:
+                package['Provides'] = provides
+            return {'package': package, 'relations': {'Provides': [[{'name': 'virtual'}]]}}
+        rows = [row('z', 'virtual, virtual (= 1)'), row('b', 'virtual')]
+        self.assertEqual(MODULE.resolve_roots(['virtual'], rows), ['b', 'z'])
+        self.assertEqual(MODULE.resolve_roots(['virtual'], list(reversed(rows))), ['b', 'z'])
+        self.assertEqual(MODULE.resolve_roots(['virtual', 'b'], rows), ['b', 'z'])
+        self.assertEqual(MODULE.resolve_roots(['virtual'], rows + [row('virtual')]), ['virtual'])
+        for bad in ('virtual:any', 'virtual | other', 'virtual (>= 1)', 'virtual (= !)',
+                    'virtual,', '', 'virtual (= 1), bad:any', 42):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                MODULE.resolve_roots(['virtual'], [row('a', bad)])
+        for roots, packages in ((['virtual'], [row('a')]), (['BAD'], rows),
+                                (['virtual'], [row('BAD', 'virtual')])):
+            with self.subTest(roots=roots, packages=packages), self.assertRaises(ValueError):
+                MODULE.resolve_roots(roots, packages)
+
+    def test_noninstalled_provider_cannot_resolve_root(self):
+        lock, doc = fixture()
+        lock['build_roots'] = ['virtual']
+        part = doc['closures']['build']
+        part['roots'] = ['virtual']
+        provider = copy.deepcopy(part['packages'][0])
+        provider['package'].update(Package='provider', Provides='virtual')
+        part['packages'].append(provider)
+        with self.assertRaises(ValueError):
+            MODULE.populate(lock, doc)
+
     def test_provider_edges_and_snapshot_membership(self):
         lock, doc = fixture()
         for part in doc['closures'].values():

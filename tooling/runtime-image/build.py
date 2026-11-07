@@ -24,6 +24,9 @@ spec = importlib.util.spec_from_file_location('runtime_closure', HERE / 'closure
 closure = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(closure)
 discovery = closure.discovery
+spec = importlib.util.spec_from_file_location('populate_lock', HERE / 'populate_lock.py')
+populate_lock = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(populate_lock)
 BASE = 'docker.io/library/debian@sha256:' + discovery.BASE.removeprefix('sha256:')
 BUILDKIT = 'docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75'
 FRONTEND = 'docker.io/docker/dockerfile@sha256:dc9e236567481e0aca4c1f52351af213b9a176622f10e3f4a86e5cc48919fa01'
@@ -91,9 +94,11 @@ def validate_closure(document, indexes, lock=None, compare=None):
             part = document['closures'][kind]
             post = [tuple(row) for row in part['post']]
             base = [tuple(row) for row in part['base']]
-            if part['pre'] != part['base'] or part['roots'] != lock[kind + '_roots']:
+            if part['pre'] != part['base'] or part['roots'] != list(closure.ROOTS[kind]):
                 raise ValueError('closure roots or pre-inventory mismatch')
             rows = closure.match_installed(post, indexes)
+            if populate_lock.resolve_roots(part['roots'], rows) != lock[kind + '_roots']:
+                raise ValueError('resolved roots differ from lock')
             closure.match_installed(base, indexes)
             given = part['packages']
             if len(rows) != len(given) or not rows:

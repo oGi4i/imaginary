@@ -60,14 +60,17 @@ image and release metadata. The buildx and Syft payload bytes have not yet been
 downloaded and checked against their published checksums, and the tools have not
 been executed in the approved CI build environment. These are separate pending
 checks.
-Package roots and build flags record the recipe intent, not a resolved closure.
+Unpopulated package roots and build flags record the recipe intent, not a resolved closure.
 The module hashes identify the tracked files, and `source_date_epoch` is the
 upstream baseline commit timestamp. Package closures and features remain
 unresolved. Discovery evidence is not itself a package closure or qualification.
 
 `tooling/runtime-image/populate_lock.py` provides a pure transformation of
 closure evidence into a new lock object; it does not access files, authenticate
-metadata, or authorize a build. It maps all recorded provider edges to the sorted
+metadata, or authorize a build. Closure evidence retains requested roots. The
+populated lock instead records concrete installed roots: an exact installed name
+wins, otherwise all installed providers from valid raw `Provides` are sorted and
+deduplicated. This does not claim an APT provider choice. It maps provider edges to the sorted
 union of provider names for each source. It records `base` when the exact identity
 appears in the base inventory, not as proof of the original installed deb. The
 consumer must independently authenticate indexes, recompute package matches and

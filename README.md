@@ -62,8 +62,10 @@ available parsed package/native observations; missing tools leave evidence
 incomplete. Its closure step resolves separate build/runtime package inventories
 using verified metadata and payloads in network-disabled CI containers. Until
 that step succeeds, no complete package closure is recorded. Dependency edges
-record every distinct installed satisfying provider, not an APT provider choice;
-see [runtime-input discovery](docs/runtime-inputs.md).
+record every distinct installed satisfying provider, not an APT provider choice.
+The lock mapper preserves requested roots in closure evidence and records concrete
+installed roots in the populated lock; the build preparer independently checks
+those roots against authenticated metadata. See [runtime-input discovery](docs/runtime-inputs.md).
 The [offline recipe and preparer](docs/runtime-build.md) and
 [two-build experiment](docs/runtime-image-ci.md) are source preparation, not
 completed images. The experiment fails before Docker or tool acquisition because

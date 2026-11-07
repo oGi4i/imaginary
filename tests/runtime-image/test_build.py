@@ -69,6 +69,9 @@ class BuildPreparationTests(unittest.TestCase):
                     'closures': {'build': copy.deepcopy(part), 'runtime': copy.deepcopy(part)}}
         lock = {'build_roots': ['a'], 'runtime_roots': ['a'],
                 'build_packages': copy.deepcopy(locks), 'runtime_packages': copy.deepcopy(locks)}
+        roots_patch = unittest.mock.patch.dict(build.closure.ROOTS, {'build': ('a',), 'runtime': ('a',)})
+        roots_patch.start()
+        self.addCleanup(roots_patch.stop)
         build.validate_closure(document, indexes, lock, lambda *args: True)
         mutations = [lambda e: e.pop(), lambda e: e.append(copy.deepcopy(e[0])),
                      lambda e: e[0]['provider'].update(name='a'),
@@ -84,6 +87,45 @@ class BuildPreparationTests(unittest.TestCase):
         incomplete['build_packages'][0]['dependencies'].pop()
         with self.assertRaisesRegex(ValueError, 'dependencies'):
             build.validate_closure(document, indexes, incomplete, lambda *args: True)
+
+    def test_virtual_roots_are_bound_to_authenticated_metadata(self):
+        pkg = {'Package': 'provider', 'Version': '1', 'Architecture': 'amd64',
+               'Filename': 'pool/provider.deb', 'Size': '4', 'SHA256': hashlib.sha256(b'data').hexdigest(),
+               'Provides': 'virtual (= 1)'}
+        indexes = [('main', [pkg])]
+        post = [['provider', '1', 'amd64']]
+        row = build.closure.match_installed(post, indexes)[0]
+        url = build.closure.archive_root('main') + pkg['Filename']
+        given = dict(row, artifact_url=url, relations=build.closure.relations(pkg))
+        part = {'post': post, 'base': post, 'pre': post, 'roots': ['virtual'],
+                'packages': [given], 'dependency_edges': []}
+        document = {'schema_version': 1, 'platform': 'linux/amd64', 'base_manifest': build.discovery.BASE,
+                    'closures': {'build': copy.deepcopy(part), 'runtime': copy.deepcopy(part)}}
+        item = {'name': 'provider', 'version': '1', 'architecture': 'amd64', 'repository': 'main',
+                'url': url, 'size': 4, 'sha256': pkg['SHA256'], 'provenance': 'base', 'dependencies': []}
+        lock = {'build_roots': ['provider'], 'runtime_roots': ['provider'],
+                'build_packages': [copy.deepcopy(item)], 'runtime_packages': [copy.deepcopy(item)]}
+        with unittest.mock.patch.dict(build.closure.ROOTS, {'build': ('virtual',), 'runtime': ('virtual',)}):
+            build.validate_closure(document, indexes, lock, lambda *args: True)
+            altered = copy.deepcopy(document)
+            altered['closures']['build']['roots'] = ['provider']
+            with self.assertRaises(ValueError):
+                build.validate_closure(altered, indexes, lock, lambda *args: True)
+            altered = copy.deepcopy(lock)
+            altered['build_roots'] = ['virtual']
+            with self.assertRaises(ValueError):
+                build.validate_closure(document, indexes, altered, lambda *args: True)
+            altered = copy.deepcopy(document)
+            altered['closures']['build']['packages'][0]['package']['Provides'] = 'other'
+            with self.assertRaises(ValueError):
+                build.validate_closure(altered, indexes, lock, lambda *args: True)
+            changed_indexes = copy.deepcopy(indexes)
+            changed_indexes[0][1][0]['Provides'] = 'other'
+            changed_document = copy.deepcopy(document)
+            changed_document['closures']['build']['packages'][0]['package']['Provides'] = 'other'
+            changed_document['closures']['build']['packages'][0]['relations'] = build.closure.relations(changed_indexes[0][1][0])
+            with self.assertRaises(ValueError):
+                build.validate_closure(changed_document, changed_indexes, lock, lambda *args: True)
 
     def test_download_refuses_untrusted_url(self):
         with self.assertRaisesRegex(ValueError, 'URL'):

@@ -31,6 +31,42 @@ def _inventory(value):
     return result
 
 
+def resolve_roots(roots, rows):
+    """Resolve requested names against installed raw package metadata."""
+    if (not isinstance(roots, list) or not roots
+            or any(not isinstance(root, str) or not _NAME.fullmatch(root) for root in roots)
+            or len(set(roots)) != len(roots)):
+        raise ValueError('invalid roots')
+    names, providers = set(), {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get('package'), dict):
+            raise ValueError('invalid package metadata')
+        pkg = row['package']
+        name, _, _ = _identity([pkg.get('Package'), pkg.get('Version'), pkg.get('Architecture')])
+        if name in names:
+            raise ValueError('duplicate package name')
+        names.add(name)
+        if 'Provides' not in pkg:
+            continue
+        value = pkg['Provides']
+        if not isinstance(value, str):
+            raise ValueError('invalid Provides')
+        for atom in value.split(','):
+            match = re.fullmatch(r'\s*([a-z0-9][a-z0-9+.-]{0,199})(?:\s*\(=\s*([A-Za-z0-9][A-Za-z0-9.+:~_-]{0,199})\))?\s*', atom)
+            if not match:
+                raise ValueError('invalid Provides')
+            providers.setdefault(match[1], set()).add(name)
+    resolved = set()
+    for root in roots:
+        if root in names:
+            resolved.add(root)
+        elif root in providers:
+            resolved.update(providers[root])
+        else:
+            raise ValueError('missing root provider')
+    return sorted(resolved)
+
+
 def _edge_identity(value):
     if not isinstance(value, dict) or set(value) != {'name', 'version', 'architecture'}:
         raise ValueError('invalid edge identity')
@@ -40,7 +76,7 @@ def _edge_identity(value):
 def _packages(part, roots, date):
     if not isinstance(part, dict) or set(part) != {'roots', 'base', 'pre', 'post', 'solver', 'packages', 'dependency_edges'}:
         raise ValueError('invalid closure fields')
-    if part['roots'] != roots or not isinstance(roots, list) or not roots or len(set(roots)) != len(roots):
+    if part['roots'] != roots:
         raise ValueError('closure roots mismatch')
     if not isinstance(part['solver'], str) or len(part['solver']) > 4 * 1024 * 1024:
         raise ValueError('invalid solver output')
@@ -83,8 +119,9 @@ def _packages(part, roots, date):
         by_identity[identity] = {'name': identity[0], 'version': identity[1], 'architecture': identity[2],
                                  'repository': repo, 'url': url, 'size': int(size), 'sha256': sha,
                                  'dependencies': [], 'provenance': 'base' if identity in base else 'snapshot'}
-    if set(post) != set(by_identity) or any(root not in {item[0] for item in post} for root in roots):
+    if set(post) != set(by_identity):
         raise ValueError('incomplete package inventory')
+    resolved_roots = resolve_roots(roots, rows)
     edges = part['dependency_edges']
     if not isinstance(edges, list) or len(edges) > 100000:
         raise ValueError('invalid dependency edges')
@@ -98,7 +135,7 @@ def _packages(part, roots, date):
         dependencies[source].add(provider[0])
     for identity, item in by_identity.items():
         item['dependencies'] = sorted(dependencies[identity])
-    return sorted(by_identity.values(), key=lambda item: item['name'])
+    return sorted(by_identity.values(), key=lambda item: item['name']), resolved_roots
 
 
 def populate(lock, document):
@@ -127,5 +164,6 @@ def populate(lock, document):
         raise ValueError('invalid snapshot date')
     result = copy.deepcopy(lock)
     for kind in ('build', 'runtime'):
-        result[kind + '_packages'] = _packages(document['closures'][kind], lock.get(kind + '_roots'), date)
+        result[kind + '_packages'], result[kind + '_roots'] = _packages(
+            document['closures'][kind], lock.get(kind + '_roots'), date)
     return result
