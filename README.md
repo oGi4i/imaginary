@@ -62,6 +62,11 @@ available parsed package/native observations; missing tools leave evidence
 incomplete. Its closure step resolves separate build/runtime package inventories
 using verified metadata and payloads in network-disabled CI containers. Until
 that step succeeds, no complete package closure is recorded.
+The [offline recipe and preparer](docs/runtime-build.md) and
+[two-build experiment](docs/runtime-image-ci.md) are source preparation, not
+completed images. The experiment fails before Docker or tool acquisition because
+the BuildKit daemon and RUN privilege contract remains unresolved. Pinned-tool
+approval does not remove that gate or establish runtime/reference feature parity.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image

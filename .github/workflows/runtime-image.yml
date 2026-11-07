@@ -1,0 +1,214 @@
+name: Runtime image experiment
+
+on:
+  push:
+    branches: [mitigate-native-memory]
+    paths:
+      - '.github/workflows/runtime-image.yml'
+      - 'Dockerfile'
+      - 'docs/runtime-image.lock.yaml'
+      - 'tooling/runtime-image/**'
+      - 'tests/runtime-image/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '**.go'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'oGi4i/imaginary' && github.ref == 'refs/heads/mitigate-native-memory'
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [one, two]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Test offline helpers
+        run: python3 -I -B -m unittest discover -s tests/runtime-image -v
+      - name: Block runtime image execution
+        run: |
+          echo 'Runtime image build is blocked pending a builder privilege disposition.' >&2
+          exit 1
+      - name: Discover verified inputs and package closures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence" "$RUNNER_TEMP/docker-config"
+          export DOCKER_CONFIG="$RUNNER_TEMP/docker-config"
+          image='docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a'
+          timeout -k 10 300 docker pull --platform linux/amd64 "$image"
+          container="runtime-keyring-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup_containers() {
+            local names
+            names=$(timeout -k 10 30 docker ps -a --filter "name=^/${container}$" --format '{{.Names}}') || return 1
+            if [ -n "$names" ]; then
+              test "$names" = "$container" || return 1
+              timeout -k 10 30 docker rm -f "$container" || return 1
+            fi
+            names=$(timeout -k 10 30 docker ps -a --filter "name=^/${container}$" --format '{{.Names}}') || return 1
+            test -z "$names"
+          }
+          cleanup() { local status=$?; trap - EXIT; cleanup_containers || status=1; exit "$status"; }
+          trap cleanup EXIT
+          timeout -k 10 30 docker create --name "$container" --platform linux/amd64 "$image"
+          timeout -k 10 30 docker cp "$container:/usr/share/keyrings/debian-archive-keyring.gpg" "$RUNNER_TEMP/evidence/keyring.gpg"
+          timeout -k 10 1800 python3 -I -B tooling/runtime-image/discovery.py --keyring "$RUNNER_TEMP/evidence/keyring.gpg" --output "$RUNNER_TEMP/evidence/discovery.json"
+          timeout -k 10 1800 python3 -I -B tooling/runtime-image/closure.py --discoveryJSON "$RUNNER_TEMP/evidence/discovery.json" --output "$RUNNER_TEMP/evidence/closure.json"
+      - name: Prepare locked offline context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          tree=$(git rev-parse "$GITHUB_SHA^{tree}")
+          recipe=$(git show "$GITHUB_SHA:Dockerfile" | sha256sum | cut -d' ' -f1)
+          workflow=$(git show "$GITHUB_SHA:.github/workflows/runtime-image.yml" | sha256sum | cut -d' ' -f1)
+          timeout -k 10 3700 python3 -I -B tooling/runtime-image/build.py \
+            --lock docs/runtime-image.lock.yaml --closure "$RUNNER_TEMP/evidence/closure.json" \
+            --discovery "$RUNNER_TEMP/evidence/discovery.json" --keyring "$RUNNER_TEMP/evidence/keyring.gpg" \
+            --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/runtime-context" \
+            --commit "$GITHUB_SHA" --tree "$tree" --recipe-sha256 "$recipe" \
+            --workflow .github/workflows/runtime-image.yml --workflow-sha256 "$workflow"
+      - name: Install verified Buildx and Syft
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/docker-config"
+          mkdir -p "$DOCKER_CONFIG/cli-plugins" "$RUNNER_TEMP/tools" "$RUNNER_TEMP/evidence/artifact"
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 67010712 -o "$DOCKER_CONFIG/cli-plugins/docker-buildx" https://github.com/docker/buildx/releases/download/v0.21.2/buildx-v0.21.2.linux-amd64
+          test "$(stat -c %s "$DOCKER_CONFIG/cli-plugins/docker-buildx")" = 67010712
+          echo 'b13bee81c3db12a4be7d0b9d042b64d0dd9ed116f7674dfac0ffdf2a71acfe3d  '"$DOCKER_CONFIG/cli-plugins/docker-buildx" | sha256sum -c -
+          chmod 755 "$DOCKER_CONFIG/cli-plugins/docker-buildx"
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 17966142 -o "$RUNNER_TEMP/tools/syft.tar.gz" https://github.com/anchore/syft/releases/download/v1.20.0/syft_1.20.0_linux_amd64.tar.gz
+          test "$(stat -c %s "$RUNNER_TEMP/tools/syft.tar.gz")" = 17966142
+          echo '689e12c5cbf67521ce61b9c126068f9eaabe1223e77971b2fede50033ff6b5cc  '"$RUNNER_TEMP/tools/syft.tar.gz" | sha256sum -c -
+          timeout -k 10 30 tar -xOzf "$RUNNER_TEMP/tools/syft.tar.gz" syft > "$RUNNER_TEMP/tools/syft"
+          test -s "$RUNNER_TEMP/tools/syft"
+          chmod 755 "$RUNNER_TEMP/tools/syft"
+      - name: Build and inspect runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/docker-config"
+          builder="runtime-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          tag="runtime-experiment:${{ matrix.replica }}"
+          container="runtime-test-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          verification="runtime-verification-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          checks="runtime-checks-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          inventory="runtime-inventory-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          artifact_checks="runtime-artifacts-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          symlink_checks="runtime-symlinks-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup_containers() {
+            local name names status=0
+            for name in "$verification" "$checks" "$inventory" "$container" "$artifact_checks" "$symlink_checks"; do
+              names=$(timeout -k 10 30 docker ps -a --filter "name=^/${name}$" --format '{{.Names}}') || { status=1; continue; }
+              if [ -n "$names" ]; then
+                if [ "$names" != "$name" ]; then status=1; continue; fi
+                timeout -k 10 30 docker rm -f "$name" || status=1
+              fi
+              names=$(timeout -k 10 30 docker ps -a --filter "name=^/${name}$" --format '{{.Names}}') || { status=1; continue; }
+              [ -z "$names" ] || status=1
+            done
+            return "$status"
+          }
+          cleanup_builder() {
+            local names
+            names=$(timeout -k 10 30 docker buildx ls --format '{{.Name}}') || return 1
+            if printf '%s\n' "$names" | cut -d' ' -f1 | grep -Fxq "$builder"; then
+              timeout -k 10 30 docker buildx rm "$builder" || return 1
+            fi
+            names=$(timeout -k 10 30 docker buildx ls --format '{{.Name}}') || return 1
+            ! printf '%s\n' "$names" | cut -d' ' -f1 | grep -Fxq "$builder"
+          }
+          cleanup() {
+            local status=$?
+            trap - EXIT
+            cleanup_containers || status=1
+            cleanup_builder || status=1
+            exit "$status"
+          }
+          trap cleanup EXIT
+          python3 -I -c 'import json; d=json.load(open("docs/runtime-image.lock.yaml"))["build_tools"]; assert d["syft"] == {"url":"https://github.com/anchore/syft/releases/download/v1.20.0/syft_1.20.0_linux_amd64.tar.gz","size":17966142,"sha256":"689e12c5cbf67521ce61b9c126068f9eaabe1223e77971b2fede50033ff6b5cc"}; assert {a["name"]:a["commit"] for a in d["actions"]}["download-artifact"] == "d3f86a106a0bac45b974a628896c90dbdf5c8093"'
+          timeout -k 10 300 docker buildx create --name "$builder" --driver docker-container --driver-opt image=docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75 --use
+          timeout -k 10 300 docker buildx inspect "$builder" --bootstrap > "$RUNNER_TEMP/evidence/artifact/builder-inspect.txt"
+          docker buildx version > "$RUNNER_TEMP/evidence/artifact/buildx-version.txt"
+          docker inspect "buildx_buildkit_${builder}0" --format '{{.Config.Image}}' | tee "$RUNNER_TEMP/evidence/artifact/buildkit-image.txt"
+          test "$(docker inspect "buildx_buildkit_${builder}0" --format '{{.Config.Image}}')" = 'docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75'
+          epoch=$(python3 -I -c 'import json; print(json.load(open("docs/runtime-image.lock.yaml"))["build"]["source_date_epoch"])')
+          case "$epoch" in ''|*[!0-9]*) exit 1;; esac
+          timeout -k 10 3600 docker buildx build --builder "$builder" --platform linux/amd64 --target runtime --no-cache --provenance=false --sbom=false --build-arg "SOURCE_DATE_EPOCH=$epoch" --output "type=oci,dest=$RUNNER_TEMP/evidence/artifact/image.oci.tar,name=$tag,rewrite-timestamp=true" "$RUNNER_TEMP/runtime-context"
+          timeout -k 10 300 docker load -i "$RUNNER_TEMP/evidence/artifact/image.oci.tar"
+          test "$(docker image inspect "$tag" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect "$tag" --format '{{.Config.User}}')" = nobody
+          test "$(docker image inspect "$tag" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/imaginary"]'
+          timeout -k 10 120 docker run --name "$checks" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'test "$(id -u)" != 0; test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.28"; ldd /usr/local/bin/imaginary; ! ldd /usr/local/bin/imaginary | grep -q "not found"' > "$RUNNER_TEMP/evidence/artifact/runtime-checks.txt"
+          timeout -k 10 30 docker create --name "$verification" --network none "$tag"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/builder-vips.txt" "$RUNNER_TEMP/evidence/artifact/builder-vips.txt"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/artifact-sha256.txt" "$RUNNER_TEMP/evidence/artifact/builder-artifacts.sha256"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/artifact-symlinks.txt" "$RUNNER_TEMP/evidence/artifact/builder-symlinks.txt"
+          timeout -k 10 120 docker run --name "$inventory" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'dpkg-query -W; getconf GNU_LIBC_VERSION; ldd /usr/local/bin/imaginary; ldd /usr/local/lib/libvips.so.42' > "$RUNNER_TEMP/evidence/artifact/runtime-inventory.txt"
+          timeout -k 10 120 docker run --name "$artifact_checks" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'sha256sum /usr/local/bin/imaginary | awk '\''{print $1 "  imaginary"}'\''; find /usr/local/lib -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum' > "$RUNNER_TEMP/evidence/artifact/runtime-artifacts.sha256"
+          cmp "$RUNNER_TEMP/evidence/artifact/builder-artifacts.sha256" "$RUNNER_TEMP/evidence/artifact/runtime-artifacts.sha256"
+          timeout -k 10 120 docker run --name "$symlink_checks" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'find /usr/local/lib -type l -printf '\''%p -> %l\n'\'' | LC_ALL=C sort' > "$RUNNER_TEMP/evidence/artifact/runtime-symlinks.txt"
+          cmp "$RUNNER_TEMP/evidence/artifact/builder-symlinks.txt" "$RUNNER_TEMP/evidence/artifact/runtime-symlinks.txt"
+          timeout -k 10 30 docker run -d --name "$container" --network bridge -p 127.0.0.1::9000 --read-only --cap-drop ALL --security-opt no-new-privileges "$tag"
+          port=$(docker port "$container" 9000/tcp)
+          case "$port" in 127.0.0.1:*) ;; *) exit 1;; esac
+          : > "$RUNNER_TEMP/evidence/artifact/codecs.jsonl"
+          goarchive="$RUNNER_TEMP/runtime-context/inputs/go.tar.gz"
+          test "$(stat -c %s "$goarchive")" = 100448992
+          echo 'ff445e48af27f93f66bd949ae060d97991c83e11289009d311f25426258f9c44  '"$goarchive" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/response-go"
+          timeout -k 10 120 tar -xzf "$goarchive" -C "$RUNNER_TEMP/response-go"
+          export GOROOT="$RUNNER_TEMP/response-go/go" GOWORK=off GOPROXY=off GOSUMDB=off
+          timeout -k 10 120 "$GOROOT/bin/go" build -o "$RUNNER_TEMP/runtime-response-check" ./cmd/runtime-response-check
+          for kind in jpeg png webp; do
+            case "$kind" in jpeg) file=testdata/imaginary.jpg;; png) file=testdata/test.png;; webp) file=testdata/test.webp;; esac
+            for attempt in 1 2 3 4 5; do
+              if status=$(curl --silent --show-error --noproxy '*' --max-time 10 --max-filesize 1048576 -o "$RUNNER_TEMP/evidence/response" -w '%{http_code}' -X POST --data-binary "@$file" "http://$port/resize?width=1&height=1&type=png"); then break; fi
+              test "$attempt" != 5
+              sleep 2
+            done
+            timeout -k 10 30 "$RUNNER_TEMP/runtime-response-check" "$status" "$kind" "$RUNNER_TEMP/evidence/response" >> "$RUNNER_TEMP/evidence/artifact/codecs.jsonl"
+          done
+          printf '%s\n' '{"runtime_loader_enumeration":"unavailable","feature_parity":"unqualified","codec_checks":"codecs.jsonl"}' > "$RUNNER_TEMP/evidence/artifact/features.json"
+          timeout -k 10 600 "$RUNNER_TEMP/tools/syft" "oci-archive:$RUNNER_TEMP/evidence/artifact/image.oci.tar" -o spdx-json > "$RUNNER_TEMP/evidence/artifact/sbom.spdx.json"
+          cp "$RUNNER_TEMP/runtime-context/provenance.json" "$RUNNER_TEMP/evidence/artifact/provenance.json"
+          cp "$RUNNER_TEMP/runtime-context/context-manifest.json" "$RUNNER_TEMP/evidence/artifact/context-manifest.json"
+          sha256sum "$RUNNER_TEMP/evidence/artifact/image.oci.tar" "$RUNNER_TEMP/evidence/artifact/sbom.spdx.json" > "$RUNNER_TEMP/evidence/artifact/payload-sha256.txt"
+          stat -c '%s %n' "$RUNNER_TEMP/evidence/artifact/image.oci.tar" "$RUNNER_TEMP/evidence/artifact/sbom.spdx.json" > "$RUNNER_TEMP/evidence/artifact/payload-size.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-image-${{ matrix.replica }}
+          path: ${{ runner.temp }}/evidence/artifact/
+          if-no-files-found: error
+          retention-days: 7
+  compare:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: runtime-image-one
+          path: ${{ runner.temp }}/one
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: runtime-image-two
+          path: ${{ runner.temp }}/two
+      - name: Compare image content and source identities
+        run: |
+          set -euo pipefail
+          cmp "$RUNNER_TEMP/one/provenance.json" "$RUNNER_TEMP/two/provenance.json"
+          timeout -k 10 600 python3 -I -B tooling/runtime-image/verify_image.py "$RUNNER_TEMP/one/image.oci.tar" "$RUNNER_TEMP/two/image.oci.tar"

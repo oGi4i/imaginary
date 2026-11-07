@@ -55,6 +55,13 @@ Only disposable offline package containers add CHOWN, DAC_OVERRIDE, FOWNER, SETU
 and SETGID to the otherwise dropped capability set so APT can retain its sandbox.
 Reference probes and serving workloads do not inherit those build capabilities.
 
+The locked offline recipe and context preparer are source-only build preparation;
+see `docs/runtime-build.md`. The separate two-build experiment workflow fails
+before Docker or tool acquisition until the BuildKit daemon and RUN privilege
+contract is resolved; see `docs/runtime-image-ci.md`. Do not remove that gate
+based only on pinned-tool approval. Source tests and builder feature evidence
+cannot establish runtime/reference loader parity or qualify memory.
+
 ## Verification and limits
 
 Use `.github/workflows/native-memory.yml` for tests, race checks, vet and build.
