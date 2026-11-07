@@ -49,6 +49,15 @@ const completeV2 = `{
   "features":["jpeg"]
 }`
 
+func TestV1LegacyImageReference(t *testing.T) {
+	input := replaceOnce(t, completeLock,
+		"example.test/builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"debian/bookworm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if missing, err := Validate(strings.NewReader(input)); err != nil || len(missing) != 0 {
+		t.Fatalf("legacy v1: missing=%v err=%v", missing, err)
+	}
+}
+
 func TestCommittedV2LockIsIncomplete(t *testing.T) {
 	f, err := os.Open("../../docs/runtime-image.lock.yaml")
 	if err != nil {

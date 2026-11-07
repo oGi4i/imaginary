@@ -50,8 +50,10 @@ also retains bounded numeric lifecycle observations when enabled. Image response
 include `X-Imaginary-Request-Sequence` only when qualification is enabled.
 
 The strict JSON-compatible YAML [runtime lock](docs/runtime-image.lock.yaml)
-and source-lock CLI validate structure and list unresolved inputs. They do not
-authenticate the lock or build an image; see [candidate image](docs/candidate-image.md).
+and source-lock CLI validate structure and list unresolved inputs. Its
+[schema 2](docs/runtime-lock.md) records artifact/snapshot/package/tool identities;
+`--json` emits validity and unresolved fields without authenticating them.
+They do not build an image; see [candidate image](docs/candidate-image.md).
 The separate [runtime-input discovery](docs/runtime-inputs.md) workflow is
 incomplete preparation for authenticated inputs and reference inventory. It does
 not produce a candidate image or establish reproducibility. Its independent

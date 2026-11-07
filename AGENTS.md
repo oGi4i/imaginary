@@ -33,8 +33,12 @@ the listener is not qualification evidence. Its bounded lifecycle records exist
 only when enabled. See `docs/qualification-observation.md`.
 
 The strict JSON-compatible YAML runtime lock and source-lock CLI validate
-structure and report unresolved inputs. They do not authenticate the lock or
-build an image. See `docs/candidate-image.md`. The separate runtime-input
+structure and report unresolved inputs. Schema 2 adds explicit artifact, snapshot,
+keyring, package and tool identities; schema 1 remains a legacy structural format.
+`source-lock --json PATH` reports fixed validity/unresolved fields, not approval.
+An explicitly unqualified build may permit only the missing `features` field;
+all other unresolved inputs block preparation. See `docs/runtime-lock.md`.
+Neither schema validation nor JSON output authenticates the lock or builds an image. See `docs/candidate-image.md`. The separate runtime-input
 metadata workflow and helpers are incomplete discovery preparation; see
 `docs/runtime-inputs.md`. Its tests use mocked public metadata locally. Actual
 input discovery and native reference inventory belong on GitHub-hosted runners,

@@ -1,20 +1,33 @@
 {
-  "schema_version": 1,
-  "source": {
-    "upstream_commit": "9357624e976790905f1b1bf4d059f8643c21e6fb",
-    "bimg_version": "1.1.4"
+  "schema_version": 2,
+  "source": {"upstream_commit": "9357624e976790905f1b1bf4d059f8643c21e6fb", "bimg_version": "1.1.4"},
+  "libvips": {"version": "8.10.0", "archive_url": "https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz", "archive_sha256": "1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9"},
+  "platform": "linux/amd64",
+  "builder_image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a",
+  "runtime_image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a",
+  "snapshot": {
+    "date": "20240408T000000Z",
+    "main": {
+      "inrelease": {"url": "https://snapshot.debian.org/archive/debian/20240408T000000Z/dists/buster/InRelease", "size": 121573, "sha256": "d2126c57347cfe5ca81d912ddfecc02e9a741c6e100d8d8295b735f979bc1a9d"},
+      "packages": {"url": "https://snapshot.debian.org/archive/debian/20240408T000000Z/dists/buster/main/binary-amd64/Packages.xz", "size": 7909256, "sha256": "62e908201deef3b8e0a7da2e770925b31c8a54a8d22fad7cc058034978859a35"},
+      "keyring": {"image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a", "path": "/usr/share/keyrings/debian-archive-keyring.gpg", "size": null, "sha256": "a7e4bc8bb121334d5552593e12347e74a6f89920da74eabc511535b99cfbc9fb"},
+      "signing_key_fingerprint": "80d15823b7fd1561f9f7bcdddc30d7c23cbbabee",
+      "release_identity": {"origin": "Debian", "label": "Debian", "codename": "buster", "suite": "oldoldstable", "date": "Sat, 10 Jun 2023 08:53:33 UTC", "valid_until": null}
+    },
+    "security": {
+      "inrelease": {"url": "https://snapshot.debian.org/archive/debian-security/20240408T000000Z/dists/buster/updates/InRelease", "size": 34843, "sha256": "b1cd95f497755bfc6426218c7d452ad9d06d372cd95f6c1ec89321fba77a7cc1"},
+      "packages": {"url": "https://snapshot.debian.org/archive/debian-security/20240408T000000Z/dists/buster/updates/main/binary-amd64/Packages.xz", "size": 594932, "sha256": "190b771f18aa9933016cff56bab8b3bf7e4d7d004d900ece5bffaffc0dbb1781"},
+      "keyring": {"image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a", "path": "/usr/share/keyrings/debian-archive-keyring.gpg", "size": null, "sha256": "a7e4bc8bb121334d5552593e12347e74a6f89920da74eabc511535b99cfbc9fb"},
+      "signing_key_fingerprint": "5e61b217265da9807a23c5ff4dfab270caa96dfa",
+      "release_identity": {"origin": "Debian", "label": "Debian-Security", "codename": "buster", "suite": "oldoldstable", "date": "Sun, 07 Apr 2024 12:12:17 UTC", "valid_until": "Sun, 14 Apr 2024 12:12:17 UTC"}
+    }
   },
-  "libvips": {
-    "version": "8.10.0",
-    "archive_sha256": "1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9"
-  },
-  "platform": null,
-  "builder_image": null,
-  "runtime_image": null,
-  "snapshot": null,
   "build_packages": null,
   "runtime_packages": null,
-  "go_toolchain": null,
+  "build_roots": null,
+  "runtime_roots": null,
+  "go_toolchain": {"version": "1.20.14", "url": "https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz", "size": 100448992, "sha256": "ff445e48af27f93f66bd949ae060d97991c83e11289009d311f25426258f9c44"},
   "build_tools": null,
+  "build": null,
   "features": null
 }
