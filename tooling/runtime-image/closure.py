@@ -38,6 +38,19 @@ class PublishedCleanupError(ClosureError):
     pass
 
 
+AUTH_REASONS = frozenset(('mismatched_snapshot', 'unexpected_index_identity',
+                          'overall_deadline', 'index_parse', 'base_missing', 'base_ambiguous',
+                          'base_invalid'))
+
+
+class AuthIndexError(ClosureError):
+    def __init__(self, reason):
+        if reason not in AUTH_REASONS:
+            raise ValueError('invalid authentication diagnostic')
+        super().__init__('authenticated index rejected')
+        self.reason = reason
+
+
 STAGES = frozenset(('input', 'setup', 'base_pull', 'base_inspect', 'create', 'start', 'base_inventory',
                     'keyring', 'auth_index', 'mirror', 'configure', 'pre_inventory', 'solver',
                     'download', 'install', 'check', 'post', 'graph', 'cleanup', 'publish'))
@@ -48,13 +61,16 @@ CLEANUP_STATES = frozenset(('not_attempted', 'succeeded', 'failed'))
 
 
 class DiagnosticError(Exception):
-    def __init__(self, where, kind, category, code=None, cleanup='not_attempted'):
+    def __init__(self, where, kind, category, code=None, cleanup='not_attempted', reason=None):
         if (where not in STAGES or kind not in KINDS or category not in CATEGORIES
                 or cleanup not in CLEANUP_STATES or (code is not None and
-                (category != 'command_exit' or type(code) is not int or not 1 <= code <= 255))):
+                (category != 'command_exit' or type(code) is not int or not 1 <= code <= 255))
+                or (reason is not None and (where != 'auth_index' or category != 'closure_error'
+                                            or reason not in AUTH_REASONS))):
             raise ValueError('invalid diagnostic')
         super().__init__('closure operation failed')
         self.where, self.kind, self.category, self.code, self.cleanup = where, kind, category, code, cleanup
+        self.reason = reason
 
 
 def classify(exc):
@@ -89,6 +105,8 @@ def diagnostic_message(exc):
     message = f'closure failure stage={exc.where} kind={exc.kind} category={exc.category}'
     if exc.code is not None:
         message += f' code={exc.code}'
+    if exc.reason is not None:
+        message += f' reason={exc.reason}'
     return message + f' cleanup={exc.cleanup}'
 
 
@@ -103,7 +121,9 @@ def stage(where, kind='none'):
     except Exception as exc:
         category, code = classify(exc)
         cleanup = 'failed' if getattr(exc, '_closure_cleanup_failed', False) else 'not_attempted'
-        raise DiagnosticError(where, kind, category, code, cleanup) from exc
+        reason = exc.reason if (where == 'auth_index' and type(exc) is AuthIndexError
+                                and exc.reason in AUTH_REASONS) else None
+        raise DiagnosticError(where, kind, category, code, cleanup, reason) from exc
 
 
 @contextmanager
@@ -185,19 +205,23 @@ def authenticated_indexes(document, keyring):
     end = globals().get('_OVERALL_END')
     remaining = 600 if end is None else min(600, end - time.monotonic())
     if remaining <= 0:
-        raise ClosureError('overall deadline exceeded')
+        raise AuthIndexError('overall_deadline')
     with deadline(remaining):
         metadata = discovery.snapshot_metadata(keyring)
     if document.get('snapshot') != metadata or set(metadata) != set(ARCHIVES):
-        raise ClosureError('authenticated snapshot differs from discovery')
+        raise AuthIndexError('mismatched_snapshot')
     indexes = []
     for name, (_, dist) in ARCHIVES.items():
         info = metadata[name]
         url = archive_root(name) + 'dists/' + dist + '/main/binary-amd64/Packages.xz'
         if info['packages_url'] != url or info['packages_size'] > 32 * 1024 * 1024:
-            raise ClosureError('unexpected index location or size')
+            raise AuthIndexError('unexpected_index_identity')
         blob = official_fetch(url, limit=info['packages_size'])
-        indexes.append((name, parse_index(blob, info['packages_size'], info['packages_sha256'])))
+        try:
+            index = parse_index(blob, info['packages_size'], info['packages_sha256'])
+        except ClosureError as exc:
+            raise AuthIndexError('index_parse') from exc
+        indexes.append((name, index))
     return indexes
 
 
@@ -310,6 +334,12 @@ def _validate_package(package):
         raise ClosureError('invalid package hash')
 
 
+class MatchError(ClosureError):
+    def __init__(self, reason):
+        super().__init__('installed package match rejected')
+        self.reason = reason
+
+
 def match_installed(installed, indexes):
     """Require a unique exact package/version/architecture in signed indexes."""
     by_key = {}
@@ -326,14 +356,25 @@ def match_installed(installed, indexes):
             raise ClosureError('invalid or duplicate installed package')
         seen.add(key)
         matches = by_key.get(key, [])
+        if not matches:
+            raise MatchError('base_missing')
         if len(matches) != 1:
-            raise ClosureError('missing or ambiguous installed package')
+            raise MatchError('base_ambiguous')
         repository, package = matches[0]
         _validate_package(package)
         result.append({'repository': repository, 'package': package})
     if not result:
         raise ClosureError('empty installed inventory')
     return result
+
+
+def match_base(installed, indexes):
+    try:
+        return match_installed(installed, indexes)
+    except MatchError as exc:
+        raise AuthIndexError(exc.reason) from exc
+    except ClosureError as exc:
+        raise AuthIndexError('base_invalid') from exc
 
 
 def relations(package):
@@ -554,7 +595,7 @@ def collect(document, temp, run):
                      str(keypath / 'keyring.gpg')], timeout=30)
             with stage('auth_index', kind):
                 indexes = authenticated_indexes(document, keypath / 'keyring.gpg')
-                match_installed(base, indexes)
+                match_base(base, indexes)
             with stage('mirror', kind):
                 write_mirror(mirror, document['snapshot'])
                 run(['docker', 'cp', str(mirror), name + ':/mirror'], timeout=60)

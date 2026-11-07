@@ -354,6 +354,47 @@ class ClosureTest(unittest.TestCase):
         second.__context__ = first
         self.assertEqual(c.classify(first), ('other', None))
 
+    def test_auth_subcodes_are_fixed_and_safe(self):
+        for source, expected in [(c.AuthIndexError('mismatched_snapshot'), 'mismatched_snapshot'),
+                                 (c.AuthIndexError('unexpected_index_identity'), 'unexpected_index_identity'),
+                                 (c.AuthIndexError('overall_deadline'), 'overall_deadline'),
+                                 (c.AuthIndexError('index_parse'), 'index_parse'),
+                                 (c.AuthIndexError('base_missing'), 'base_missing'),
+                                 (c.AuthIndexError('base_ambiguous'), 'base_ambiguous'),
+                                 (c.AuthIndexError('base_invalid'), 'base_invalid')]:
+            with self.subTest(expected=expected), self.assertRaises(c.DiagnosticError) as caught:
+                with c.stage('auth_index', 'build'):
+                    raise source
+            self.assertEqual(c.diagnostic_message(caught.exception),
+                             f'closure failure stage=auth_index kind=build category=closure_error reason={expected} cleanup=not_attempted')
+        with self.assertRaises(ValueError):
+            c.AuthIndexError('secret path')
+        with self.assertRaises(c.DiagnosticError) as caught:
+            with c.stage('solver', 'build'):
+                raise c.AuthIndexError('base_missing')
+        self.assertNotIn('reason=', c.diagnostic_message(caught.exception))
+
+    def test_auth_subcodes_pin_actual_sites(self):
+        with mock.patch.object(c.discovery, 'snapshot_metadata', return_value={}):
+            with self.assertRaises(c.AuthIndexError) as caught:
+                c.authenticated_indexes({'snapshot': {}}, Path('unused'))
+            self.assertEqual(caught.exception.reason, 'mismatched_snapshot')
+        metadata = {name: {'packages_url': 'private', 'packages_size': 1} for name in c.ARCHIVES}
+        with mock.patch.object(c.discovery, 'snapshot_metadata', return_value=metadata):
+            with self.assertRaises(c.AuthIndexError) as caught:
+                c.authenticated_indexes({'snapshot': metadata}, Path('unused'))
+            self.assertEqual(caught.exception.reason, 'unexpected_index_identity')
+
+    def test_base_match_distinguishes_missing_ambiguous_and_invalid(self):
+        base = [('example', '1', 'amd64')]
+        invalid = record(); invalid['Filename'] = '../invalid'
+        for records, reason in [([], 'base_missing'), ([record(), record()], 'base_ambiguous'),
+                                ([invalid], 'base_invalid')]:
+            with self.subTest(reason=reason), self.assertRaises(c.AuthIndexError) as caught:
+                c.match_base(base, [('main', records)])
+            self.assertEqual(caught.exception.reason, reason)
+        self.assertEqual(len(c.match_base(base, [('main', [record()])])), 1)
+
     def test_auth_and_keyring_stages_are_not_misidentified(self):
         for needle, expected in [('/usr/share/keyrings/', 'keyring'), ('__auth__', 'auth_index')]:
             calls = []
