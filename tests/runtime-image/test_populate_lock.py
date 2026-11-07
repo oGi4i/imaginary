@@ -1,5 +1,7 @@
 import copy
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -33,6 +35,30 @@ def fixture():
            'limitations': ['Base provenance does not prove installed deb bytes.',
                            'Unreviewed discovery is not a reproducible image.']}
     return lock, doc
+
+
+class CommittedLockTests(unittest.TestCase):
+    def test_authenticated_package_closure(self):
+        path = Path(__file__).resolve().parents[2] / 'docs/runtime-image.lock.yaml'
+        data = path.read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(),
+                         'f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c')
+        lock = json.loads(data)
+        self.assertIsNone(lock['features'])
+        for kind, package_count, root_count, fft in (
+                ('build', 396, 27, 'libfftw3-dev'),
+                ('runtime', 188, 24, 'libfftw3-3')):
+            with self.subTest(kind=kind):
+                packages = lock[kind + '_packages']
+                roots = lock[kind + '_roots']
+                self.assertEqual(len(packages), package_count)
+                self.assertEqual(len(roots), root_count)
+                names = {package['name'] for package in packages}
+                self.assertEqual(len(names), package_count)
+                self.assertIn(fft, roots)
+                self.assertTrue(set(roots) <= names)
+                for package in packages:
+                    self.assertTrue(set(package['dependencies']) <= names, package['name'])
 
 
 class PopulateLockTests(unittest.TestCase):

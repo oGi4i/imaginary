@@ -1,6 +1,6 @@
 # Candidate image build design
 
-This is a **partially implemented build design**, not a reproducible image. No candidate image has been built or qualified. The runtime-input workflow now verifies public base/toolchain metadata and signed snapshot indexes; see [runtime inputs](runtime-inputs.md). The separate [reference inventory](reference-inventory.md) remains incomplete where the published image lacks tools. Complete package closures and the locked recipe are still required. Image publication and deployment remain separate from CI input/build execution. Native execution is not approved locally; the existing Ubuntu source tests do not validate the serving ABI.
+This is a **partially implemented build design**, not a reproducible image. No candidate image has been built or qualified. The runtime-input workflow authenticated package closures that are now recorded in the lock; see [runtime inputs](runtime-inputs.md). The separate [reference inventory](reference-inventory.md) remains incomplete where the published image lacks tools. The BuildKit privilege gate blocks the image experiment. Image publication and deployment remain separate from CI input/build execution. Native execution is not approved locally; the existing Ubuntu source tests do not validate the serving ABI.
 
 ## Reference and fixed inputs
 
@@ -46,14 +46,9 @@ For reproducibility, also lock the image builder and Dockerfile frontend, target
 
 ## Missing locks and approvals
 
-These values are **not yet established** and must not be replaced with floating tags or guessed hashes:
+The lock records the Debian base, Go toolchain, snapshot and package closures; it does not establish a qualified build. Source CI 42404371864 passed, and the authentication step in run 42404371869 succeeded. Reviewed proposal artifact 13586846705 supplied the manually copied lock, SHA-256 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`. The verifier never automatically modifies the tracked lock. This is package-closure evidence only.
 
-- Official Go builder image, toolchain version and platform-specific manifest digest compatible with Buster and the target architecture.
-- Old Debian runtime image and platform-specific manifest digest; exact target architecture and reference-image digest.
-- A dated Debian snapshot, signing keys and exact versions and checksums for the complete build and runtime package closures. Capture the reference's installed package manifest, dynamic-library closure, libvips configure/features and loader inventory first. A matching glibc version alone is insufficient to preserve native behavior.
-- Exact fork commit, clean source tree, build flags and environment; pinned workflow actions, Dockerfile frontend and image builder. Record the libvips archive URL and verified checksum in the lock alongside the module files and acquisition policy.
-
-The current continuation covers official Go/Debian/build-tool input verification, the public reference inventory and GitHub-hosted candidate image builds retained as CI artifacts. Reference inventory uses fixed read-only commands in the exact pinned image under isolated, non-root execution; it does not start the service. These permissions do not extend to registry publication, local native execution, cluster actions or production changes. Verified metadata is recorded by the discovery workflow, but missing artifact hashes, package closures and features remain blockers rather than guessed values.
+Reference inventory uses fixed read-only commands in the pinned public image under isolated, non-root execution; it does not start the service. Reference feature and loader evidence remains incomplete. A matching glibc version alone is insufficient to preserve native behavior. Build-time input verification, the BuildKit privilege disposition and image checks remain required. These permissions do not extend to registry publication, local native execution, cluster actions or production changes.
 
 ## Provenance and release gate
 

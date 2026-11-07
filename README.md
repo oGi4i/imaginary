@@ -54,17 +54,16 @@ and source-lock CLI validate structure and list unresolved inputs. Its
 [schema 2](docs/runtime-lock.md) records artifact/snapshot/package/tool identities;
 `--json` emits validity and unresolved fields without authenticating them.
 They do not build an image; see [candidate image](docs/candidate-image.md).
-The separate [runtime-input discovery](docs/runtime-inputs.md) workflow is
-incomplete preparation for authenticated inputs and reference inventory. Its
-source-only verifier proposes an unqualified package lock after a pinned replay;
-hosted success remains unproven. It does not produce a candidate image or
-establish reproducibility. Its independent
-[published-reference inventory](docs/reference-inventory.md) job records only
-available parsed package/native observations; missing tools leave evidence
-incomplete. Its closure step resolves separate build/runtime package inventories
-using verified metadata and payloads in network-disabled CI containers. Until
-that step succeeds, no complete package closure is recorded. Dependency edges
-record every distinct installed satisfying provider, not an APT provider choice.
+The [runtime-input discovery](docs/runtime-inputs.md) workflow authenticated the
+package closure after a pinned replay. Source CI 42404371864 passed and the
+verifier step in run 42404371869 succeeded. Reviewed proposal artifact 13586846705
+supplied the manually populated lock, SHA-256
+`f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+The verifier never automatically modifies the tracked lock. This evidence covers
+only the package closure; features remain null. It does not produce a candidate
+image or establish reproducibility. The independent [published-reference inventory](docs/reference-inventory.md)
+remains incomplete where tools are missing. Dependency edges record every distinct
+installed satisfying provider, not an APT provider choice.
 The lock mapper preserves requested roots in closure evidence and records concrete
 installed roots in the populated lock; the build preparer independently checks
 those roots against authenticated metadata. See [runtime-input discovery](docs/runtime-inputs.md).

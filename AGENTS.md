@@ -42,8 +42,8 @@ Neither schema validation nor JSON output authenticates the lock or builds an im
 metadata workflow and helpers are incomplete discovery preparation; see
 `docs/runtime-inputs.md`. Its tests use mocked public metadata locally. Actual
 input discovery and native reference inventory belong on GitHub-hosted runners,
-not local execution. Unknown package closures and feature evidence stay missing;
-a discovery artifact is not a locked or reproducible candidate image. The separate
+not local execution. The reviewed package closure is recorded; feature evidence
+remains missing. A discovery artifact is not a reproducible candidate image. The separate
 reference-inventory job uses fixed read-only probes in the pinned public image;
 see `docs/reference-inventory.md`. Missing native/ELF tools yield incomplete
 evidence, not feature equivalence. Fatal supervision/identity/cleanup errors must
@@ -61,10 +61,13 @@ bounded to validated public identities and must not echo raw errors. The pure lo
 mapper resolves requested roots to concrete installed names using raw `Provides`;
 the build preparer checks requests against source-owned roots and independently
 resolves them from authenticated package rows. Neither step claims an APT choice.
-A separate source-only verifier is proposed in the discovery job. It requires
-an exact pinned closure replay and authenticates package evidence before it
-publishes an unqualified candidate lock and identity-bound report. Its mocked
-tests do not establish hosted success or authorize tracked lock population.
+The discovery verifier requires an exact pinned closure replay and authenticates
+package evidence before publishing an unqualified candidate lock and identity-bound
+report. Source CI 42404371864 passed; the verifier step in run 42404371869
+succeeded. Reviewed proposal artifact 13586846705 supplied the manually populated
+lock, SHA-256 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+The verifier never automatically modifies the tracked lock. This evidence covers
+only the package closure; features remain null and memory remains unqualified.
 
 The locked offline recipe and context preparer are source-only build preparation;
 see `docs/runtime-build.md`. The separate two-build experiment workflow fails

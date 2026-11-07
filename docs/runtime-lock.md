@@ -5,10 +5,10 @@ structural description of inputs, not authentication, build authorization,
 feature equivalence or evidence of reproducibility. The source-lock parser also
 accepts schema 1 for compatibility; schema 1 is not a build contract.
 Source, tree, recipe and workflow provenance belongs in external evidence, not
-in the lock that those objects contain. The source-only discovery verifier can
-propose package fields after authenticating a pinned closure replay. Its artifact
-is unqualified and does not modify the tracked lock; hosted success and review
-are still required.
+in the lock that those objects contain. The discovery verifier authenticated a
+pinned closure replay. Its unqualified proposal never automatically modifies the
+tracked lock; the reviewed candidate was manually copied into the lock. See
+[runtime inputs](runtime-inputs.md) for run, artifact and digest identities.
 
 All keys are required. Unknown or duplicate keys, case variants, trailing data,
 invalid UTF-8 and inputs over 1 MiB are rejected. A top-level nullable input is
@@ -63,10 +63,14 @@ image and release metadata. The buildx and Syft payload bytes have not yet been
 downloaded and checked against their published checksums, and the tools have not
 been executed in the approved CI build environment. These are separate pending
 checks.
-Unpopulated package roots and build flags record the recipe intent, not a resolved closure.
+The tracked lock records 396 build and 188 runtime packages with 27 and 24
+concrete roots respectively. The reviewed candidate's SHA-256 is
+`f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+Source CI 42404371864 passed; run 42404371869 authenticated the closure and
+proposal artifact 13586846705 supplied the reviewed bytes. This evidence covers
+only package closure, not features, image reproducibility or memory qualification.
 The module hashes identify the tracked files, and `source_date_epoch` is the
-upstream baseline commit timestamp. Package closures and features remain
-unresolved. Discovery evidence is not itself a package closure or qualification.
+upstream baseline commit timestamp. `features` remains null.
 
 `tooling/runtime-image/populate_lock.py` provides a pure transformation of
 closure evidence into a new lock object; it does not access files, authenticate

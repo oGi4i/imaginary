@@ -50,7 +50,7 @@ including base-installed packages. If it succeeds, the separate
 days. If the helper fails, the workflow cannot upload closure evidence that
 was not written. A reviewed CI run is required to establish whether resolution
 actually succeeds; code or mocked tests alone do not establish a closure.
-The proposed verifier runs in the same job after a fresh collector replay. It
+The verifier runs in the same job after a fresh collector replay. It
 requires the source-pinned closure digest and length, reauthenticates the base,
 keyring, signed indexes and package evidence, measures the base independently,
 and verifies all final payload hashes and sizes. It recomputes dependency edges
@@ -58,8 +58,12 @@ with Debian version comparison before mapping the lock. Its 20-minute deadline
 reserves cleanup time. Only after cleanup does it publish the exact
 `candidate-lock.json` and `verification.json` files for seven days. The report
 binds source, workflow, run, input and candidate hashes; it is not an external
-signature. Features remain null and the result is unqualified. Hosted execution
-has not yet established success. The tracked lock is not modified.
+signature. Source CI run 42404371864 passed. The authentication step in run
+42404371869 succeeded, and the reviewed proposal artifact 13586846705 supplied
+exact candidate bytes manually copied into the tracked lock. Their SHA-256 is
+`f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+The verifier never automatically modifies the tracked lock. This evidence covers
+only the package closure; features remain null and the result is unqualified.
 
 For failed offline APT configuration, CI may retain at most eight sanitized
 `E:`/`W:` lines, each capped at 160 characters. URLs, paths, controls and

@@ -2,8 +2,13 @@
 
 The recipe and preparer are under development. Do not use their output as a
 candidate image until independent review and the GitHub-hosted build checks
-pass. The current lock has unresolved inputs, including package closures and
-keyring size. Preparation must fail until those inputs are established.
+pass. The lock now records reviewed authenticated package closures and keyring
+size; `features` remains null. Source CI 42404371864 passed and the authentication
+step in run 42404371869 succeeded. Reviewed proposal artifact 13586846705 supplied
+candidate SHA-256 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+The verifier never automatically modifies the lock; these bytes were copied manually.
+This evidence covers only the package closure, not reference parity, image
+reproducibility or memory qualification. The BuildKit privilege gate remains closed.
 
 `tooling/runtime-image/build.py` accepts `--lock`, `--closure`, `--discovery`,
 `--keyring`, `--source`, `--output`, `--commit`, `--tree`, `--recipe-sha256`,

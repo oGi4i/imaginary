@@ -14,9 +14,9 @@ one OCI artifact per build, and compare content-addressed objects in a third job
 An OCI artifact is not a registry image, production approval or a memory bound.
 
 The remaining description is the proposed path, not evidence of execution or
-completed review. Preparation fails until the lock contains the authenticated package closures,
-build configuration, and other required inputs. Discovery output alone is not
-approval. The workflow extracts the keyring from the digest-pinned base, resolves
+completed review. The lock now contains the reviewed authenticated package
+closures. `features` remains null, and preparation still requires its other
+inputs and checks. Discovery output alone is not approval. The workflow extracts the keyring from the digest-pinned base, resolves
 closures, then passes those files to `build.py`. Preparation binds the clean
 source checkout to the GitHub commit, tree, Dockerfile, and workflow hashes.
 The runner downloads Buildx and Syft and checks their exact sizes and SHA-256
@@ -39,7 +39,7 @@ For JPEG, PNG and WebP inputs, it checks HTTP status and independently decodes
 the complete PNG output with the verified Go toolchain. It checks 1×1 output
 dimensions before recording success. The runtime image has no `vips` CLI; builder
 loader output does not prove runtime loader equivalence. `features.json` marks runtime loader enumeration unavailable
-and feature parity unqualified. Missing reference-feature evidence and actual
-closure verification remain acceptance blockers. Matching image object digests
+and feature parity unqualified. Missing reference-feature evidence and independent
+build-time closure verification remain acceptance blockers. Matching image object digests
 are not an independent security disposition or evidence of deployment fitness.
 Run only offline mocked Python tests locally; do not run native builds locally.
