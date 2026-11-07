@@ -10,14 +10,14 @@
     "main": {
       "inrelease": {"url": "https://snapshot.debian.org/archive/debian/20240408T000000Z/dists/buster/InRelease", "size": 121573, "sha256": "d2126c57347cfe5ca81d912ddfecc02e9a741c6e100d8d8295b735f979bc1a9d"},
       "packages": {"url": "https://snapshot.debian.org/archive/debian/20240408T000000Z/dists/buster/main/binary-amd64/Packages.xz", "size": 7909256, "sha256": "62e908201deef3b8e0a7da2e770925b31c8a54a8d22fad7cc058034978859a35"},
-      "keyring": {"image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a", "path": "/usr/share/keyrings/debian-archive-keyring.gpg", "size": null, "sha256": "a7e4bc8bb121334d5552593e12347e74a6f89920da74eabc511535b99cfbc9fb"},
+      "keyring": {"image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a", "path": "/usr/share/keyrings/debian-archive-keyring.gpg", "size": 73314, "sha256": "a7e4bc8bb121334d5552593e12347e74a6f89920da74eabc511535b99cfbc9fb"},
       "signing_key_fingerprint": "80d15823b7fd1561f9f7bcdddc30d7c23cbbabee",
       "release_identity": {"origin": "Debian", "label": "Debian", "codename": "buster", "suite": "oldoldstable", "date": "Sat, 10 Jun 2023 08:53:33 UTC", "valid_until": null}
     },
     "security": {
       "inrelease": {"url": "https://snapshot.debian.org/archive/debian-security/20240408T000000Z/dists/buster/updates/InRelease", "size": 34843, "sha256": "b1cd95f497755bfc6426218c7d452ad9d06d372cd95f6c1ec89321fba77a7cc1"},
       "packages": {"url": "https://snapshot.debian.org/archive/debian-security/20240408T000000Z/dists/buster/updates/main/binary-amd64/Packages.xz", "size": 594932, "sha256": "190b771f18aa9933016cff56bab8b3bf7e4d7d004d900ece5bffaffc0dbb1781"},
-      "keyring": {"image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a", "path": "/usr/share/keyrings/debian-archive-keyring.gpg", "size": null, "sha256": "a7e4bc8bb121334d5552593e12347e74a6f89920da74eabc511535b99cfbc9fb"},
+      "keyring": {"image": "docker.io/library/debian@sha256:1a43c9ee12ad03a221ffa57e9c41a73388b6cf4cb84c50c3ed734e9ce8ca3c6a", "path": "/usr/share/keyrings/debian-archive-keyring.gpg", "size": 73314, "sha256": "a7e4bc8bb121334d5552593e12347e74a6f89920da74eabc511535b99cfbc9fb"},
       "signing_key_fingerprint": "5e61b217265da9807a23c5ff4dfab270caa96dfa",
       "release_identity": {"origin": "Debian", "label": "Debian-Security", "codename": "buster", "suite": "oldoldstable", "date": "Sun, 07 Apr 2024 12:12:17 UTC", "valid_until": "Sun, 14 Apr 2024 12:12:17 UTC"}
     }
@@ -27,7 +27,15 @@
   "build_roots": null,
   "runtime_roots": null,
   "go_toolchain": {"version": "1.20.14", "url": "https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz", "size": 100448992, "sha256": "ff445e48af27f93f66bd949ae060d97991c83e11289009d311f25426258f9c44"},
-  "build_tools": null,
+  "build_tools": {
+    "buildkit_image": "docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75",
+    "frontend_image": "docker.io/docker/dockerfile@sha256:dc9e236567481e0aca4c1f52351af213b9a176622f10e3f4a86e5cc48919fa01",
+    "buildx": {"url": "https://github.com/docker/buildx/releases/download/v0.21.2/buildx-v0.21.2.linux-amd64", "size": 67010712, "sha256": "b13bee81c3db12a4be7d0b9d042b64d0dd9ed116f7674dfac0ffdf2a71acfe3d"},
+    "actions": [
+      {"name": "checkout", "repository": "https://github.com/actions/checkout", "commit": "11bd71901bbe5b1630ceea73d27597364c9af683"},
+      {"name": "upload-artifact", "repository": "https://github.com/actions/upload-artifact", "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02"}
+    ]
+  },
   "build": null,
   "features": null
 }

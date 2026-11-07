@@ -54,5 +54,10 @@ Schema 2 fields:
 
 The stored base digest, Go payload and signed snapshot index identities came
 from discovery artifact 13573423316. The InRelease sizes came from official
-snapshot downloads whose hashes match that artifact. Package closures, tool
-identities, build settings and features remain unresolved. Discovery evidence is not itself a package closure or qualification.
+snapshot downloads whose hashes match that artifact. Discovery artifact
+13574856370 records the keyring size and hash. Tool identities come from public
+image and release metadata. The buildx payload bytes have not yet been downloaded
+and checked against the published checksum, and the binary has not been executed
+in the approved CI build environment. These are separate pending checks.
+Package closures, roots, build settings and features remain unresolved. Discovery
+evidence is not itself a package closure or qualification.

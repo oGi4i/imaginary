@@ -233,6 +233,52 @@ class DiscoveryTest(unittest.TestCase):
         self.assertNotIn('private', proc.stderr)
         self.assertNotIn('Traceback', proc.stderr)
 
+    def test_nested_deadline_uses_earliest_and_restores_remaining(self):
+        with mock.patch.object(d.signal, 'signal', return_value='previous') as handler, \
+             mock.patch.object(d.signal, 'getitimer', return_value=(3.0, 2.0)), \
+             mock.patch.object(d.signal, 'setitimer') as timer, \
+             mock.patch.object(d.time, 'monotonic', side_effect=[10.0, 11.0]):
+            with self.assertRaisesRegex(RuntimeError, 'first'):
+                with d.deadline(60):
+                    raise RuntimeError('first')
+            self.assertEqual(timer.call_args_list[0], mock.call(d.signal.ITIMER_REAL, 3.0))
+            self.assertEqual(timer.call_args_list[1], mock.call(d.signal.ITIMER_REAL, 0))
+            self.assertEqual(timer.call_args_list[2], mock.call(d.signal.ITIMER_REAL, 2.0, 2.0))
+            self.assertEqual(handler.call_args_list[-1], mock.call(d.signal.SIGALRM, 'previous'))
+
+    def test_expired_outer_timer_rearmed_after_outer_handler(self):
+        current = ['outer']
+        events = []
+        def handler(signum, value):
+            old = current[0]
+            current[0] = value
+            events.append(('handler', value))
+            return old
+        def timer(which, value, interval=0):
+            events.append(('timer', value))
+            if value == 0.000001 and current[0] != 'outer':
+                current[0](d.signal.SIGALRM, None)
+        with mock.patch.object(d.signal, 'signal', side_effect=handler), \
+             mock.patch.object(d.signal, 'getitimer', return_value=(1, 0)), \
+             mock.patch.object(d.signal, 'setitimer', side_effect=timer), \
+             mock.patch.object(d.time, 'monotonic', side_effect=[0, 2]):
+            with self.assertRaisesRegex(RuntimeError, 'first'):
+                with d.deadline(60):
+                    raise RuntimeError('first')
+        self.assertLess(events.index(('timer', 0)), events.index(('handler', 'outer')))
+        self.assertLess(events.index(('handler', 'outer')), events.index(('timer', 0.000001)))
+
+    def test_deadline_restores_inactive_and_expired_outer_timer(self):
+        for previous, elapsed, expected in (((0, 0), 1, 0), ((2, 0), 3, 0.000001)):
+            with self.subTest(previous=previous), \
+                 mock.patch.object(d.signal, 'signal'), \
+                 mock.patch.object(d.signal, 'getitimer', return_value=previous), \
+                 mock.patch.object(d.signal, 'setitimer') as timer, \
+                 mock.patch.object(d.time, 'monotonic', side_effect=[10.0, 10.0 + elapsed]):
+                with d.deadline(1):
+                    pass
+                self.assertEqual(timer.call_args_list[-1], mock.call(d.signal.ITIMER_REAL, expected, 0))
+
     def test_fetch_has_absolute_deadline(self):
         class Slow:
             def __enter__(self): return self

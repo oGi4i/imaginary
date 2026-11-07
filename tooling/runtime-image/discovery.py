@@ -173,13 +173,19 @@ def open_url(request):
 def deadline(seconds):
     def expired(signum, frame):
         raise TimeoutError('fetch deadline exceeded')
+    started = time.monotonic()
+    previous = signal.getitimer(signal.ITIMER_REAL)
     old = signal.signal(signal.SIGALRM, expired)
-    previous = signal.setitimer(signal.ITIMER_REAL, seconds)
     try:
+        signal.setitimer(signal.ITIMER_REAL, min(seconds, previous[0]) if previous[0] else seconds)
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, *previous)
-        signal.signal(signal.SIGALRM, old)
+        remaining = max(0.000001, previous[0] - (time.monotonic() - started)) if previous[0] else 0
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        finally:
+            signal.signal(signal.SIGALRM, old)
+        signal.setitimer(signal.ITIMER_REAL, remaining, previous[1])
 
 
 def fetch(url, headers=None, limit=32 * 1024 * 1024):

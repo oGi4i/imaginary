@@ -68,7 +68,12 @@ func TestCommittedV2LockIsIncomplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("committed lock is invalid: %v", err)
 	}
-	for _, name := range []string{"snapshot.main.keyring.size", "snapshot.security.keyring.size", "build_packages", "runtime_packages", "build_roots", "runtime_roots", "build_tools", "build", "features"} {
+	for _, got := range missing {
+		if got == "snapshot.main.keyring.size" || got == "snapshot.security.keyring.size" || got == "build_tools" || strings.HasPrefix(got, "build_tools.") {
+			t.Errorf("verified metadata unexpectedly unresolved: %s", got)
+		}
+	}
+	for _, name := range []string{"build_packages", "runtime_packages", "build_roots", "runtime_roots", "build", "features"} {
 		found := false
 		for _, got := range missing {
 			if got == name {
