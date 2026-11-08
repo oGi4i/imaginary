@@ -37,3 +37,36 @@ config are not inferred from a shared-library version. This inventory does not p
 loader parity, publisher build provenance, production suitability or a memory
 bound. Do not run the helper locally; no image publication or deployment is part
 of this job.
+
+## Hosted native-file result at `4467683`
+
+Input run 42493897646 collected and uploaded reference artifact 13622692245.
+The parsed inventory SHA-256 is
+`1a250082d50772e91254e410bbc698141b1a7d27556ac6e12a92ac60f0d56aab`.
+The fixed manifest/config/platform identities match, with 188 packages. Both new
+native probes are available: six regular files and four symlinks. The libvips CLI,
+loader/configuration and ELF probes remain unavailable, so collection exits 2 and
+the inventory remains incomplete. Package closure collection and replay
+authentication succeeded separately in the same workflow.
+
+Compared with retained candidate evidence from build commit `5fb0679`, four
+support-file hashes (`libvips.la`, `libvips-cpp.la` and both pkg-config files) and
+all four symlink targets match. Both shared-library binaries differ:
+
+| File | Published reference SHA-256 | Candidate SHA-256 |
+|---|---|---|
+| `libvips.so.42.12.3` | `6ba2d80df0919390a5f4bf346678ef5e5373a916941841b3ee0bb05d840c43cc` | `b5d4a2dc209423882438123d1cb6010abcdb1d2dd244c5e866738551424330de` |
+| `libvips-cpp.so.42.12.3` | `dbf6a70beb8bc4abed414794d2d1761ab598aab502cfac5ad60e3cf73aa5bd22` | `e4d585fdc2ef6225f1d89d8e1e0bbbde30b6282c09fe71d7023aa0166e0bb378` |
+
+All four symlinks select the corresponding `.so.42.12.3` file. A matching filename
+or support file does not explain the binary differences, and different binary
+hashes alone do not prove a loader mismatch. Registered-loader parity and publisher
+source/build provenance remain unresolved. Do not mark `features` complete or
+substitute the instrumented source baseline for this published reference.
+
+Source CI 42493897663 passed at `4467683`. Runtime run 42493897661 passed both
+independent builds and strict comparison. Its manifest, config, layers and DiffIDs
+also equal the earlier `5fb0679` result, including manifest
+`sha256:ab402cd3ed878cef6e62dffaf5dfefcc87d34a75b0f71f95f7272ddca486a2e4`.
+This supports the candidate side of the file comparison without establishing
+published-reference feature parity or memory qualification.

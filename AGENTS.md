@@ -66,6 +66,13 @@ symlink probes under `/usr/local/lib`, with strict bounded output parsing. Missi
 utilities remain unavailable; never install tools, mount a probe or start the
 reference service to fill a gap without separate approval. Native-file identities
 improve evidence but do not establish registered-loader or configuration parity.
+Run 42493897646 at `4467683` collected six native files and four symlinks. Four
+support-file hashes and all symlink targets match candidate `5fb0679`; the two
+libvips shared-library binaries differ. CLI/ELF/loader probes remain unavailable.
+Keep `features` null and reference comparability unresolved; see the inventory doc.
+Source CI 42493897663 and both runtime builds/comparison in 42493897661 pass at
+`4467683`; the OCI manifest/config/layers also match the `5fb0679` result. This
+does not resolve the published-reference binary or loader evidence gaps.
 Record all distinct installed providers that satisfy each dependency group, in
 identity order, with the first matching alternative as a witness, not an APT
 choice. Missing or invalid providers still fail. Compatibility diagnostics stay

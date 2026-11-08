@@ -67,8 +67,12 @@ only the package closure; features remain null. It does not produce a candidate
 image or establish reproducibility. The independent [published-reference inventory](docs/reference-inventory.md)
 remains incomplete where tools are missing. Its fixed native-library hash and
 symlink inventory improves file-identity evidence, not registered-loader parity;
-missing tools do not trigger installation or service startup. Dependency edges
-record every distinct
+missing tools do not trigger installation or service startup. Run 42493897646
+collected six native files and four symlinks: support files and link targets match
+candidate `5fb0679`, but the two libvips shared-library binaries differ. Loader
+parity and publisher provenance remain unresolved. Source CI 42493897663 and
+runtime run 42493897661 pass at `4467683`, with the same OCI manifest/config/layers
+as `5fb0679`. Dependency edges record every distinct
 installed satisfying provider, not an APT provider choice.
 The lock mapper preserves requested roots in closure evidence and records concrete
 installed roots in the populated lock; the build preparer independently checks
