@@ -25,6 +25,8 @@ from pathlib import Path
 IMAGE = 'docker.io/h2non/imaginary@sha256:7facb4221047a5e79b9e902f380247f4e5bf4376400d0badbeb738d3e1c2f654'
 CONFIG = 'sha256:ccc2df4fa965458678f796ef7d2af7ac2752a5b9d564bbab9d7abadac5eb7804'
 LIMIT = 1024 * 1024
+NATIVE_MAX_ROWS = 10000
+NATIVE_ROOT = '/usr/local/lib'
 PROBES = {
     'packages': "command -v dpkg-query >/dev/null || exit 127; dpkg-query -W -f='${db:Status-Abbrev}\\t${binary:Package}\\t${Version}\\t${Architecture}\\n'",
     'libc': 'command -v getconf >/dev/null || exit 127; getconf GNU_LIBC_VERSION',
@@ -35,6 +37,8 @@ PROBES = {
     'vips_elf': 'command -v readelf >/dev/null || exit 127; test -f /usr/local/lib/libvips.so.42 || exit 127; readelf -d /usr/local/lib/libvips.so.42',
     'dependencies': 'command -v ldd >/dev/null || exit 127; ldd /usr/local/bin/imaginary',
     'vips_dependencies': 'command -v ldd >/dev/null || exit 127; test -f /usr/local/lib/libvips.so.42 || exit 127; ldd /usr/local/lib/libvips.so.42',
+    'native_files': 'command -v find >/dev/null || exit 127; command -v sha256sum >/dev/null || exit 127; find /usr/local/lib -type f -exec sha256sum {} +',
+    'native_symlinks': "command -v find >/dev/null || exit 127; find /usr/local/lib -type l -printf '%p\\t%l\\n'",
 }
 
 
@@ -163,7 +167,56 @@ def parse_packages(data):
         raise InventoryError('invalid package inventory') from exc
 
 
+def native_path(path):
+    prefix = NATIVE_ROOT + '/'
+    if not path.startswith(prefix):
+        return False
+    parts = path[len(prefix):].split('/')
+    return all(re.fullmatch(r'[A-Za-z0-9_+.-]{1,200}', part)
+               and part not in ('.', '..') for part in parts)
+
+
+def parse_native(name, data):
+    try:
+        if len(data) > LIMIT or not data.endswith(b'\n'):
+            raise ValueError()
+        lines = data.decode('ascii').split('\n')[:-1]
+        if not lines or len(lines) > NATIVE_MAX_ROWS:
+            raise ValueError()
+        rows = []
+        paths = set()
+        for line in lines:
+            if name == 'native_files':
+                match = re.fullmatch(r'([0-9a-fA-F]{64})  (.+)', line)
+                if not match:
+                    raise ValueError()
+                digest, path = match.groups()
+                row = {'path': path, 'sha256': digest.lower()}
+            else:
+                path, target = line.split('\t')
+                if not (native_path(target) if target.startswith('/') else
+                        re.fullmatch(r'[A-Za-z0-9_+.-]{1,200}', target)
+                        and target not in ('.', '..')):
+                    raise ValueError()
+                row = {'path': path, 'target': target}
+            if not native_path(path) or path in paths:
+                raise ValueError()
+            paths.add(path)
+            rows.append(row)
+        if name == 'native_files':
+            if not any(re.fullmatch(r'/usr/local/lib/libvips\.so\.42\.[0-9]+(?:\.[0-9]+)*', path)
+                       for path in paths):
+                raise ValueError()
+        elif '/usr/local/lib/libvips.so.42' not in paths:
+            raise ValueError()
+        return sorted(rows, key=lambda row: row['path'])
+    except (UnicodeError, ValueError) as exc:
+        raise InventoryError('invalid probe output') from exc
+
+
 def parse_probe(name, data):
+    if name in ('native_files', 'native_symlinks'):
+        return parse_native(name, data)
     try:
         text = data.decode('ascii').strip()
         if not text or len(text) > LIMIT:
@@ -261,6 +314,16 @@ def collect(run):
         finally:
             # rm -f is needed even after a killed Docker client: the daemon owns the container.
             run(['docker', 'rm', '-f', container], timeout=30)
+    files = result['probes']['native_files']
+    links = result['probes']['native_symlinks']
+    if files['status'] == links['status'] == 'available':
+        link = next(row for row in links['value']
+                    if row['path'] == NATIVE_ROOT + '/libvips.so.42')
+        target = link['target'] if link['target'].startswith('/') else NATIVE_ROOT + '/' + link['target']
+        if (not re.fullmatch(r'/usr/local/lib/libvips\.so\.42\.[0-9]+(?:\.[0-9]+)*', target)
+                or target not in {row['path'] for row in files['value']}):
+            result['status'] = 'incomplete'
+            result['probes']['native_symlinks'] = {'status': 'unavailable'}
     return result
 
 

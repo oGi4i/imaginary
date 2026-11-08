@@ -61,6 +61,11 @@ actual closure evidence requires CI success and is not image reproducibility.
 Only disposable offline package containers add CHOWN, DAC_OVERRIDE, FOWNER, SETUID
 and SETGID to the otherwise dropped capability set so APT can retain its sandbox.
 Reference probes and serving workloads do not inherit those build capabilities.
+The unchanged reference inventory also uses fixed read-only native-file hash and
+symlink probes under `/usr/local/lib`, with strict bounded output parsing. Missing
+utilities remain unavailable; never install tools, mount a probe or start the
+reference service to fill a gap without separate approval. Native-file identities
+improve evidence but do not establish registered-loader or configuration parity.
 Record all distinct installed providers that satisfy each dependency group, in
 identity order, with the first matching alternative as a witness, not an APT
 choice. Missing or invalid providers still fail. Compatibility diagnostics stay

@@ -65,7 +65,10 @@ That historical digest predates the authorized bimg patch metadata.
 The verifier never automatically modifies the tracked lock. This evidence covers
 only the package closure; features remain null. It does not produce a candidate
 image or establish reproducibility. The independent [published-reference inventory](docs/reference-inventory.md)
-remains incomplete where tools are missing. Dependency edges record every distinct
+remains incomplete where tools are missing. Its fixed native-library hash and
+symlink inventory improves file-identity evidence, not registered-loader parity;
+missing tools do not trigger installation or service startup. Dependency edges
+record every distinct
 installed satisfying provider, not an APT provider choice.
 The lock mapper preserves requested roots in closure evidence and records concrete
 installed roots in the populated lock; the build preparer independently checks

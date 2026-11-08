@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -38,6 +39,8 @@ class InventoryTests(unittest.TestCase):
                     'vips_elf': b'Dynamic section\n 0x0001 (NEEDED) Shared library: [libc.so.6]\n',
                     'dependencies': b'libvips.so.42 => /usr/local/lib/libvips.so.42\n',
                     'vips_dependencies': b'libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6\n',
+                    'native_files': b'a' * 64 + b'  /usr/local/lib/libvips.so.42.12.0\n',
+                    'native_symlinks': b'/usr/local/lib/libvips.so.42\tlibvips.so.42.12.0\n',
                 }[probe])
                 if isinstance(value, Exception):
                     raise value
@@ -64,6 +67,128 @@ class InventoryTests(unittest.TestCase):
             self.assertIn('--pull=never', cmd)
             self.assertNotIn('--privileged', cmd)
         self.assertEqual(len([c for c in calls if c[1] == 'rm']), len(inv.PROBES))
+
+    def test_native_probes_and_sorted_values(self):
+        h = b'a' * 64
+        result = inv.collect(self.runner({
+            'native_files': h + b'  /usr/local/lib/z.so\n' + h + b'  /usr/local/lib/libvips.so.42.12.0\n',
+            'native_symlinks': b'/usr/local/lib/z\t/usr/local/lib/z.so\n/usr/local/lib/libvips.so.42\tlibvips.so.42.12.0\n',
+        }))
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['probes']['native_files']['value'][0],
+                         {'path': '/usr/local/lib/libvips.so.42.12.0', 'sha256': 'a' * 64})
+        self.assertEqual(result['probes']['native_symlinks']['value'][0],
+                         {'path': '/usr/local/lib/libvips.so.42', 'target': 'libvips.so.42.12.0'})
+        for name in ('native_files', 'native_symlinks'):
+            self.assertIn('command -v find', inv.PROBES[name])
+        self.assertIn('command -v sha256sum', inv.PROBES['native_files'])
+
+    def test_native_invalid_output_is_incomplete_and_private(self):
+        h = b'a' * 64
+        valid_file = h + b'  /usr/local/lib/libvips.so.42.12.0\n'
+        valid_link = b'/usr/local/lib/libvips.so.42\tlibvips.so.42.12.0\n'
+        cases = [
+            ('native_files', inv.ProbeExit(127)), ('native_symlinks', inv.ProbeExit(127)),
+            ('native_files', b''), ('native_symlinks', b''),
+            ('native_files', valid_file * 2), ('native_symlinks', valid_link * 2),
+            ('native_files', b'g' * 64 + b'  /usr/local/lib/libvips.so.42.12.0\n'),
+            ('native_files', h + b'  /usr/local/lib/../secret\n'),
+            ('native_files', h + b'  /usr/local/lib//libvips.so.42.12.0\n'),
+            ('native_files', h + b'  /etc/secret\n'),
+            ('native_files', h + b'  /usr/local/lib/libvips.so.42.12.0\x01\n'),
+            ('native_files', b'\\' + valid_file),
+            ('native_files', h + b' */usr/local/lib/libvips.so.42.12.0\n'),
+            ('native_files', h + b'  /usr/local/lib/other.so\n'),
+            ('native_symlinks', b'/usr/local/lib/libvips.so.42\t../secret\n'),
+            ('native_symlinks', b'/usr/local/lib/libvips.so.42\t/etc/secret\n'),
+            ('native_symlinks', b'/usr/local/lib/libvips.so.42\tother/secret\n'),
+            ('native_symlinks', b'/usr/local/lib/libvips.so.42\tbad\x01secret\n'),
+            ('native_symlinks', b'/usr/local/lib/other\tsecret\n'),
+            ('native_symlinks', valid_link.rstrip(b'\n')),
+            ('native_files', valid_file.rstrip(b'\n')),
+            ('native_files', valid_file * (inv.NATIVE_MAX_ROWS + 1)),
+            ('native_symlinks', valid_link * (inv.NATIVE_MAX_ROWS + 1)),
+            ('native_files', b'x' * (inv.LIMIT + 1)),
+        ]
+        for name, value in cases:
+            with self.subTest(name=name, value=str(value)[:100]):
+                result = inv.collect(self.runner({name: value}))
+                self.assertEqual(result['status'], 'incomplete')
+                self.assertEqual(result['probes'][name], {'status': 'unavailable'})
+                self.assertNotIn('secret', json.dumps(result))
+
+    def test_native_count_limit_and_absolute_target(self):
+        h = b'a' * 64
+        file_row = h + b'  /usr/local/lib/libvips.so.42.12.0\n'
+        rows = [h + b'  /usr/local/lib/file' + str(i).encode() + b'\n'
+                for i in range(inv.NATIVE_MAX_ROWS - 1)]
+        self.assertEqual(len(inv.parse_probe('native_files', file_row + b''.join(rows))),
+                         inv.NATIVE_MAX_ROWS)
+        with self.assertRaises(inv.InventoryError):
+            inv.parse_probe('native_files', file_row + b''.join(rows) + h + b'  /usr/local/lib/extra\n')
+        link = b'/usr/local/lib/libvips.so.42\tlibvips.so.42.12.0\n'
+        links = [b'/usr/local/lib/link' + str(i).encode() + b'\ttarget\n'
+                 for i in range(inv.NATIVE_MAX_ROWS - 1)]
+        self.assertEqual(len(inv.parse_probe('native_symlinks', link + b''.join(links))),
+                         inv.NATIVE_MAX_ROWS)
+        with self.assertRaises(inv.InventoryError):
+            inv.parse_probe('native_symlinks', link + b''.join(links) + b'/usr/local/lib/extra\ttarget\n')
+        result = inv.collect(self.runner({'native_symlinks':
+            b'/usr/local/lib/libvips.so.42\t/usr/local/lib/libvips.so.42.12.0\n'}))
+        self.assertEqual(result['status'], 'complete')
+
+    def test_native_link_must_resolve_to_reported_library(self):
+        for target in ('unrelated.so', '/usr/local/lib/libvips.so.42.9.9'):
+            result = inv.collect(self.runner({'native_symlinks':
+                ('/usr/local/lib/libvips.so.42\t' + target + '\n').encode()}))
+            self.assertEqual(result['status'], 'incomplete')
+            self.assertEqual(result['probes']['native_symlinks'], {'status': 'unavailable'})
+
+    def test_native_probe_shell_propagates_tool_failures(self):
+        with tempfile.TemporaryDirectory() as temp:
+            tools = Path(temp)
+            find = tools / 'find'
+            sha = tools / 'sha256sum'
+            find.write_text('#!/bin/sh\nexit 1\n')
+            sha.write_text('#!/bin/sh\nexit 1\n')
+            find.chmod(0o755)
+            sha.chmod(0o755)
+            env = {'PATH': temp}
+            for name in ('native_files', 'native_symlinks'):
+                with self.subTest(name=name, failure='find'):
+                    proc = subprocess.run(['/bin/sh', '-c', inv.PROBES[name]], env=env,
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self.assertNotEqual(proc.returncode, 0)
+            find.write_text('#!/bin/sh\nexec /usr/bin/find "$@"\n')
+            (tools / 'file').write_text('fixture')
+            sha.write_text('#!/bin/sh\nprintf "partial output\\n"\nexit 1\n')
+            command = inv.PROBES['native_files'].replace('/usr/local/lib', temp)
+            proc = subprocess.run(['/bin/sh', '-c', command], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn(b'partial output', proc.stdout)
+            sha.unlink()
+            proc = subprocess.run(['/bin/sh', '-c', inv.PROBES['native_files']], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(proc.returncode, 127)
+            find.unlink()
+            proc = subprocess.run(['/bin/sh', '-c', inv.PROBES['native_symlinks']], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(proc.returncode, 127)
+
+    def test_native_failures_cleanup_and_supervision(self):
+        for name in ('native_files', 'native_symlinks'):
+            for error in (inv.CommandError('timeout'), inv.CommandError('size'), inv.ProbeExit(125)):
+                calls = []
+                base = self.runner({name: error})
+                def run(argv, **kw):
+                    calls.append(argv)
+                    return base(argv, **kw)
+                with self.subTest(name=name, error=error), self.assertRaises(inv.CommandError):
+                    inv.collect(run)
+                runs = [c for c in calls if c[1] == 'run']
+                removals = [c for c in calls if c[1] == 'rm']
+                self.assertEqual([c[c.index('--name') + 1] for c in runs], [c[-1] for c in removals])
 
     def test_rejects_wrong_identity_before_execution(self):
         for key, value in [('Id', 'sha256:' + '0' * 64), ('Os', 'windows'),
