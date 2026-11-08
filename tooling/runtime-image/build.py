@@ -36,7 +36,7 @@ FRONTEND = 'docker.io/docker/dockerfile@sha256:dc9e236567481e0aca4c1f52351af213b
 BUILDX_SHA256 = 'b13bee81c3db12a4be7d0b9d042b64d0dd9ed116f7674dfac0ffdf2a71acfe3d'
 GO_SHA256 = 'ff445e48af27f93f66bd949ae060d97991c83e11289009d311f25426258f9c44'
 VIPS_SHA256 = '1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9'
-RECIPE_SHA256 = '0b8ba0619c2f632cc18abdfe5c80abab505ea38807f547ee2d06c44228a226d1'
+RECIPE_SHA256 = '195fdf90ea04ce5470d47038bef954846832a39a12108791d4a260758170547b'
 VIPS_URL = 'https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz'
 CONFIGURE = ['--disable-debug', '--disable-dependency-tracking', '--disable-introspection',
              '--disable-static', '--enable-gtk-doc-html=no', '--enable-gtk-doc=no', '--enable-pyvips8=no']
@@ -502,7 +502,11 @@ def prepare(lock, evidence, metadata, keyring, output, go, vips, validator, modu
     shutil.copyfile(vips, output / 'inputs/vips.tar.gz')
     shutil.copytree(source, output / 'source')
     shutil.copyfile(source / 'Dockerfile', output / 'Dockerfile')
-    shutil.copytree(modules, output / 'inputs/modules', symlinks=False)
+    # Checksum database tiles and lookups are mutable cache, not module inputs.
+    def ignore_sumdb(directory, names):
+        return {'sumdb'} if Path(directory) == modules / 'cache/download' and 'sumdb' in names else set()
+
+    shutil.copytree(modules, output / 'inputs/modules', symlinks=False, ignore=ignore_sumdb)
     for kind in ('build', 'runtime'):
         dest = output / 'inputs' / kind
         mirror = dest / 'mirror'

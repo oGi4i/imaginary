@@ -1,10 +1,11 @@
 # Candidate image build design
 
 This is a **partially implemented build design**, not a reproducible or qualified
-image. Approved hosted runs built and exported images, but a small-target WebP
-resize failure blocks successful runtime verification and artifact comparison;
-see [runtime image CI](runtime-image-ci.md). The user authorized a hash-bound
-bimg correction, not a weaker probe. The runtime-input workflow authenticated
+image. At `0b9b0b0`, both jobs in hosted run 42487208065 built, exported and
+passed native/runtime/codec checks after the authorized hash-bound bimg WebP
+correction. They retained image artifacts, but the comparison failed on differing
+provenance; see [runtime image CI](runtime-image-ci.md). The original 1×1 probe
+and admission controls remain unchanged. The runtime-input workflow authenticated
 package closures recorded in the lock; see [runtime inputs](runtime-inputs.md).
 The separate [reference inventory](reference-inventory.md) remains incomplete
 where the published image lacks tools. The approved BuildKit contract passed in

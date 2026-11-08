@@ -81,8 +81,14 @@ comparison was skipped. Tests-only commit `00f2d28` reproduced the small WebP
 resize failures in source CI 42433576835 and pinned-image CI 42433576851. The
 [experiment notes](docs/runtime-image-ci.md) describe the evidence and a likely,
 unconfirmed bimg cause. The authorized correction preserves the original module
-pins and records the changed source separately; hosted verification is still
-required. Earlier exports differed; reproducibility remains unproven.
+pins and records the changed source separately. Source CI 42487208013 passed at
+`0b9b0b0`; both jobs in runtime run 42487208065 passed native and codec checks
+and retained image artifacts. Their comparison failed on differing provenance,
+so reproducibility remains unproven. Artifact diagnosis found mutable checksum-DB
+cache data in the context and generated font UUID/cache, package-log and auxiliary
+ldconfig-cache differences in two runtime layers. Construction fixes retain
+strict comparison and add read-only font-cache validation; see the experiment
+notes for the explicitly approved build-log removal scope.
 These results do not establish runtime/reference feature parity or a memory bound.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or

@@ -54,14 +54,45 @@ captured and the diagnosis is not confirmed. The user explicitly authorized an
 exact-hash bimg v1.1.4 correction for both the instrumented upstream-source baseline
 and candidate, retaining libvips 8.10.0. The changed processing dependency must be
 identified separately from the unchanged published reference; the memory-policy
-comparison remains cache-only. The correction needs hosted native verification.
-Keep the original 1×1 probe and admission controls unchanged. A shared patch helper
+comparison remains cache-only. Keep the original 1×1 probe and admission controls
+unchanged. A shared patch helper
 does not establish that the instrumented baseline image was built. First patched
 run 42486160963 stopped during source-CI staging, and both jobs in 42486160994
 stopped during context preparation with `module identity mismatch`; no patched
 native tests or BuildKit solve ran. The verified original bimg ZIP lacks
 `go.mod`, which the initial staging helper incorrectly required. The correction
 adds only an exact synthetic module declaration to the local replacement.
+
+At `0b9b0b0`, source CI 42487208013 passed formatting, module verification,
+WebP small-target/content/edge regressions, full tests, race checks, vet and
+compilation. Both image jobs in run 42487208065 passed context preparation,
+the BuildKit contract, native tests, exact OCI import/config/DiffID checks,
+patch evidence comparisons, runtime checks, full 1×1 JPEG/PNG/WebP probes and
+SBOM creation. Artifacts `runtime-image-one` (13619444169) and
+`runtime-image-two` (13619694611) were retained. The comparison job then failed
+because `provenance.json` differed; image reproducibility is not established.
+The instrumented upstream-source baseline image remains unbuilt, and no memory
+qualification or production action ran.
+
+Artifact inspection traced the provenance difference to mutable Go checksum-DB
+lookup/tile cache files copied into the context. Module content and downloads
+remain verified; the preparation fix omits only `cache/download/sumdb` from the
+staged copy after verification. Original module caches and strict manifest
+comparison stay unchanged.
+
+Two of eight runtime layers also differ. Application and six native-library
+hashes match. The differing generated files are four fontconfig UUIDs and cache
+names, `/var/cache/ldconfig/aux-cache`, and four package-install logs. The user
+explicitly approved removing only `/var/log/alternatives.log`, `/var/log/dpkg.log`,
+`/var/log/apt/history.log` and `/var/log/apt/term.log` during disposable image
+construction. Signed package evidence, inventories and CI build output remain;
+no production logs change. The construction fix uses fixed distinct font UUIDs,
+matching directory timestamps and rebuilt font caches, and removes the auxiliary
+ldconfig cache in the same RUN that creates it. It preserves `/etc/ld.so.cache`,
+fonts, libraries and strict OCI comparison. Hosted checks must validate caches and
+DejaVu Sans lookup as the non-root image user with a read-only filesystem and no
+writable home/cache/temp path. None of these source changes establishes matching
+images until two new independent builds pass.
 
 The remaining description specifies the workflow, not a claim that every step
 completed. The

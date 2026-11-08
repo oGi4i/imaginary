@@ -41,6 +41,23 @@ class ImageLoadWorkflowTests(unittest.TestCase):
                 self.assertEqual(result.stderr, expected)
                 self.assertEqual(result.stdout, '')
 
+    def test_font_cache_probe_is_isolated_and_identity_gated(self):
+        workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()
+        start = workflow.index('timeout -k 10 60 docker run --name "$font_checks"')
+        end = workflow.index('\n', start)
+        probe = workflow[start:end]
+        self.assertLess(workflow.index('image_load.py validate-loaded'), start)
+        for option in ('--network none', '--read-only', '--cap-drop ALL',
+                       '--security-opt no-new-privileges', '-e HOME=/nonexistent',
+                       '-e XDG_CACHE_HOME=/nonexistent', '-e TMPDIR=/nonexistent'):
+            self.assertIn(option, probe)
+        self.assertIn('fc-cat "$d" > /dev/null || exit 1', probe)
+        self.assertIn('fc-match -f', probe)
+        self.assertIn('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', probe)
+        self.assertNotIn('--mount', probe)
+        self.assertNotIn('fc-cache', probe)
+        self.assertIn('"$symlink_checks" "$font_checks"', workflow)
+
     def test_response_checker_build_is_standard_library_only(self):
         workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()
         self.assertIn('GO111MODULE=off CGO_ENABLED=0', workflow)

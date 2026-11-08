@@ -97,10 +97,17 @@ residual factor, unlike JPEG. This is a source-supported likely cause; the nativ
 error was not captured. The user explicitly authorized a narrowly scoped
 correction with matching identities for both instrumented comparison builds.
 That correction changes dependency behavior, not the cache-only memory policy.
-Keep the original small-target probes and source admission unchanged. A patched
-source implementation still needs hosted native verification; it is not evidence
-that either comparison image was built. Earlier export digests differed;
-reproducibility remains unproven. Builder evidence cannot establish runtime/reference
+Keep the original small-target probes and source admission unchanged. At
+`0b9b0b0`, source CI 42487208013 passed all checks. Both image jobs in
+42487208065 passed native/runtime/codec checks and retained artifacts, but the
+comparison failed on differing provenance. No instrumented upstream-source
+baseline image was built. Reproducibility remains unproven. Context construction
+omits only mutable checksum-DB cache files after module verification. Runtime
+construction may remove only the four explicitly approved build logs; preserve
+signed package evidence and production logs. Font UUID/cache timestamps must be
+deterministic without dropping fonts or bypassing read-only cache validation;
+remove only the auxiliary ldconfig cache, not `/etc/ld.so.cache`. Keep exact
+provenance and OCI comparisons. Builder evidence cannot establish runtime/reference
 loader parity or qualify memory.
 
 ## Verification and limits

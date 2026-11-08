@@ -11,8 +11,10 @@ never automatically modifies the lock; the authenticated package bytes were
 copied manually.
 This evidence covers only the package closure, not reference parity, image
 reproducibility or memory qualification. The user approved the exact hosted
-BuildKit daemon and nested RUN contract; actual builds passed that gate and later
-failed the small-target WebP regression. See [runtime image CI](runtime-image-ci.md).
+BuildKit daemon and nested RUN contract. After the WebP correction, both image
+jobs in run 42487208065 passed native and runtime checks and retained artifacts;
+the comparison job failed on differing provenance. See
+[runtime image CI](runtime-image-ci.md).
 
 `tooling/runtime-image/build.py` accepts `--lock`, `--closure`, `--discovery`,
 `--keyring`, `--source`, `--output`, `--commit`, `--tree`, `--recipe-sha256`,
@@ -36,6 +38,12 @@ A temporary module file permits only the approved local replacement, and tests,
 race checks, vet and compilation must all consume it. `go mod verify` checks the
 original module cache, not a local replacement; staged-file checks provide the
 separate binding. The context uses normalized timestamps and an offline Dockerfile.
+
+After module verification, the staged cache excludes only
+`cache/download/sumdb`, whose mutable lookup/tile files caused different context
+manifests. Extracted modules and downloaded module artifacts remain available for
+offline verification. The original cache is not changed, and the strict context
+comparison is not filtered.
 
 The same source-owned patch helper and identity are required for any instrumented
 upstream-source baseline. No instrumented baseline image builder or successful

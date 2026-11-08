@@ -64,8 +64,10 @@ from discovery artifact 13573423316. The InRelease sizes came from official
 snapshot downloads whose hashes match that artifact. Discovery artifact
 13574856370 records the keyring size and hash. Tool identities come from public
 image and release metadata. Hosted image runs verified the buildx and Syft payload
-bytes and executed buildx with the approved builder. End-to-end SBOM completion
-remains unverified because image jobs stopped at the WebP correctness gate.
+bytes and executed buildx with the approved builder. Both jobs in run
+42487208065 completed runtime checks, SBOM creation and artifact upload. Their
+comparison failed on differing provenance, so these results do not establish
+reproducibility.
 The tracked lock records 396 build and 188 runtime packages with 27 and 24
 concrete roots respectively. Before addition of the separately authorized bimg
 patch identity, the reviewed candidate's SHA-256 was

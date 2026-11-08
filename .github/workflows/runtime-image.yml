@@ -104,9 +104,10 @@ jobs:
           inventory="runtime-inventory-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           artifact_checks="runtime-artifacts-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           symlink_checks="runtime-symlinks-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          font_checks="runtime-fonts-${{ matrix.replica }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup_containers() {
             local name names status=0
-            for name in "$verification" "$checks" "$inventory" "$container" "$artifact_checks" "$symlink_checks"; do
+            for name in "$verification" "$checks" "$inventory" "$container" "$artifact_checks" "$symlink_checks" "$font_checks"; do
               names=$(timeout -k 10 30 docker ps -a --filter "name=^/${name}$" --format '{{.Names}}') || { status=1; continue; }
               if [ -n "$names" ]; then
                 if [ "$names" != "$name" ]; then status=1; continue; fi
@@ -206,6 +207,7 @@ jobs:
           cmp "$RUNNER_TEMP/evidence/artifact/builder-artifacts.sha256" "$RUNNER_TEMP/evidence/artifact/runtime-artifacts.sha256"
           timeout -k 10 120 docker run --name "$symlink_checks" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'find /usr/local/lib -type l -printf '\''%p -> %l\n'\'' | LC_ALL=C sort' > "$RUNNER_TEMP/evidence/artifact/runtime-symlinks.txt"
           cmp "$RUNNER_TEMP/evidence/artifact/builder-symlinks.txt" "$RUNNER_TEMP/evidence/artifact/runtime-symlinks.txt"
+          timeout -k 10 60 docker run --name "$font_checks" --network none --read-only --cap-drop ALL --security-opt no-new-privileges -e HOME=/nonexistent -e XDG_CACHE_HOME=/nonexistent -e TMPDIR=/nonexistent --entrypoint /bin/sh "$tag" -ec 'for d in /usr/local/share/fonts /usr/share/fonts /usr/share/fonts/truetype /usr/share/fonts/truetype/dejavu; do fc-cat "$d" > /dev/null || exit 1; done; test "$(fc-match -f "%{file}\\n" sans)" = /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf; printf "%s\\n" "font_cache_lookup=ok"' > "$RUNNER_TEMP/evidence/artifact/font-check.txt"
           timeout -k 10 30 docker run -d --name "$container" --network bridge -p 127.0.0.1::9000 --read-only --cap-drop ALL --security-opt no-new-privileges "$tag"
           port=$(docker port "$container" 9000/tcp)
           case "$port" in 127.0.0.1:*) ;; *) exit 1;; esac

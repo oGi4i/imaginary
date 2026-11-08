@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import hashlib
 import importlib.util
@@ -256,6 +257,124 @@ class BuildPreparationTests(unittest.TestCase):
             before = build.context_manifest(root)
             (root / 'input').write_bytes(b'b')
             self.assertNotEqual(before, build.context_manifest(root))
+
+    def test_staged_modules_exclude_only_checksum_database_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            for name in ('go.mod', 'go.sum', 'Dockerfile'):
+                (source / name).write_text(name)
+            go = root / 'go.tar.gz'
+            go.write_bytes(b'go')
+            vips = root / 'vips.tar.gz'
+            vips.write_bytes(b'vips')
+            lock = {'platform': 'linux/amd64', 'builder_image': build.BASE, 'runtime_image': build.BASE,
+                    'build_tools': {}, '_path': root / 'lock', 'source': {'bimg_patch': build.bimg_patch.IDENTITY},
+                    'build': {'configure': build.CONFIGURE, 'cflags': ['-g', '-O3'],
+                              'cxxflags': ['-D_GLIBCXX_USE_CXX11_ABI=0', '-g', '-O3'],
+                              'go_flags': ['-trimpath'], 'module_mode': 'readonly', 'source_date_epoch': 1,
+                              'go_mod_sha256': build.hash_file(source / 'go.mod'),
+                              'go_sum_sha256': build.hash_file(source / 'go.sum')},
+                    'go_toolchain': {'version': '1.20.14', 'url': 'https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz',
+                                     'size': 100448992, 'sha256': build.GO_SHA256},
+                    'libvips': {'version': '8.10.0', 'archive_url': build.VIPS_URL,
+                                'archive_sha256': hashlib.sha256(b'vips').hexdigest()},
+                    'build_roots': [], 'runtime_roots': []}
+            packages = {'build': ([], []), 'runtime': ([], [])}
+            patches = [unittest.mock.patch.object(build, name) for name in
+                       ('validate_tools', 'validate_lock_cli', 'verify_blob', 'validate_snapshot_pins',
+                        'validate_base_inventory')]
+            patches += [unittest.mock.patch.object(build, 'VIPS_SHA256', hashlib.sha256(b'vips').hexdigest()),
+                        unittest.mock.patch.object(build, 'validate_closure', return_value=packages),
+                        unittest.mock.patch.object(build.closure, 'authenticated_indexes', return_value=[]),
+                        unittest.mock.patch.object(build.closure, 'write_mirror')]
+            for patch in patches:
+                patch.start()
+                self.addCleanup(patch.stop)
+
+            originals = []
+            manifests = []
+            for index in range(3):
+                modules = root / ('cache' + str(index))
+                files = {'cache/download/sumdb/sum.golang.org/lookup/example.org/a@v1': str(index),
+                         'cache/download/sumdb/sum.golang.org/tile/8/0/000.p/1': str(index),
+                         'cache/download/example.org/a/@v/v1.zip': 'zip',
+                         'cache/download/example.org/a/@v/v1.mod': 'mod',
+                         'cache/download/example.org/a/@v/v1.info': 'info',
+                         'cache/download/example.org/a/@v/v1.ziphash': 'hash',
+                         'example.org/a@v1/source.go': 'changed' if index == 2 else 'source',
+                         'example.org/a@v1/sumdb/retained': 'module content'}
+                for name, data in files.items():
+                    path = modules / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(data)
+                original = build.context_manifest(modules)
+                staged = root / ('staged' + str(index))
+                build.prepare(lock, {}, {'snapshot': {}}, root / 'keyring', staged, go, vips, root / 'validator', modules, source, [])
+                self.assertEqual(original, build.context_manifest(modules))
+                originals.append(original)
+                staged_modules = staged / 'inputs/modules'
+                self.assertFalse((staged_modules / 'cache/download/sumdb').exists())
+                self.assertEqual((staged_modules / 'example.org/a@v1/sumdb/retained').read_text(), 'module content')
+                for suffix in ('zip', 'mod', 'info', 'ziphash'):
+                    self.assertTrue((staged_modules / ('cache/download/example.org/a/@v/v1.' + suffix)).is_file())
+                manifest = build.context_manifest(staged)
+                self.assertTrue(all(not row['path'].startswith('/') and str(root) not in row['path'] for row in manifest))
+                manifests.append(manifest)
+            self.assertNotEqual(originals[0], originals[1])
+            self.assertEqual(manifests[0], manifests[1])
+            self.assertNotEqual(manifests[0], manifests[2])
+
+    def test_failed_module_verification_stops_staging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            output = root / 'output'
+            lock_file = root / 'lock'
+            lock_file.write_text(json.dumps({'build': {}, 'build_tools': {'buildx': {'url': 'url', 'size': 1, 'sha256': 'hash'}}, 'go_toolchain': {
+                'version': '1.20.14', 'url': 'https://dl.google.com/go/go1.20.14.linux-amd64.tar.gz',
+                'size': 100448992, 'sha256': build.GO_SHA256}}))
+            argv = ['build.py', '--lock', str(lock_file), '--closure', str(lock_file),
+                    '--discovery', str(lock_file), '--keyring', str(lock_file), '--source', str(source),
+                    '--output', str(output), '--commit', 'commit', '--tree', 'tree',
+                    '--recipe-sha256', 'recipe', '--workflow', '.github/workflows/build.yml',
+                    '--workflow-sha256', 'workflow']
+
+            def copy_source(source_path, destination, commit, tree):
+                (destination / 'docs').mkdir(parents=True)
+                (destination / 'docs/runtime-image.lock.yaml').write_bytes(lock_file.read_bytes())
+                (destination / 'go.mod').write_text('mod')
+                (destination / 'go.sum').write_text('sum')
+
+            def run(args, **kwargs):
+                if args[-2:] == ['mod', 'verify']:
+                    raise RuntimeError('module verification failed')
+                return b''
+
+            with contextlib.ExitStack() as stack:
+                for owner, name, kwargs in [
+                    (build.sys, 'argv', {'new': argv}),
+                    (build.closure, 'require_ci', {}), (build, 'validate_ci_identity', {}),
+                    (build, 'validate_tools', {}), (build.closure, 'read_discovery', {'return_value': {}}),
+                    (build, 'copy_source', {'side_effect': copy_source}),
+                    (build, 'validate_lock_source', {'return_value': 'lock'}),
+                    (build, 'hash_file', {'side_effect': ['recipe', 'workflow']}),
+                    (build, 'validate_recipe', {}), (build, 'validate_modules', {}),
+                    (build.discovery, 'fetch', {'return_value': b'go'}),
+                    (build, 'verify_blob', {}), (build, 'extract_go', {}),
+                    (build, 'fetch_github', {'return_value': b'vips'}),
+                    (build, 'VIPS_SHA256', {'new': hashlib.sha256(b'vips').hexdigest()}),
+                    (build, 'run_bounded', {'side_effect': run}), (build, 'validate_lock_cli', {}),
+                    (build, 'prepare', {}), (build, 'measure_base', {})]:
+                    stack.enter_context(unittest.mock.patch.object(owner, name, **kwargs))
+                with unittest.mock.patch.object(Path, 'read_text', return_value='recipe'):
+                    with self.assertRaisesRegex(RuntimeError, 'module verification failed'):
+                        build.main()
+                build.prepare.assert_not_called()
+                build.measure_base.assert_not_called()
+                self.assertFalse(output.exists())
 
     def test_wrong_payload_hash_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'digest'):

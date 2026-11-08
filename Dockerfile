@@ -51,11 +51,30 @@ ARG SOURCE_DATE_EPOCH
 ENV DEBIAN_FRONTEND=noninteractive TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 COPY inputs/runtime/mirror /mirror
 COPY inputs/runtime/install.sh /install.sh
-RUN --network=none /bin/sh /install.sh && rm -rf /mirror /install.sh /var/lib/apt/lists/*
+RUN --network=none set -e; \
+    /bin/sh /install.sh; \
+    for dir in /usr/local/share/fonts /usr/share/fonts /usr/share/fonts/truetype /usr/share/fonts/truetype/dejavu; do \
+      test -f "$dir/.uuid"; test ! -L "$dir/.uuid"; \
+    done; \
+    printf %s 00000000-0000-4000-8000-000000000001 > /usr/local/share/fonts/.uuid; \
+    printf %s 00000000-0000-4000-8000-000000000002 > /usr/share/fonts/.uuid; \
+    printf %s 00000000-0000-4000-8000-000000000003 > /usr/share/fonts/truetype/.uuid; \
+    printf %s 00000000-0000-4000-8000-000000000004 > /usr/share/fonts/truetype/dejavu/.uuid; \
+    touch -d "@$SOURCE_DATE_EPOCH" /usr/local/share/fonts /usr/share/fonts /usr/share/fonts/truetype /usr/share/fonts/truetype/dejavu; \
+    rm -f /var/cache/fontconfig/*-le64.cache-7; \
+    fc-cache -fs; \
+    for uuid in 00000000-0000-4000-8000-000000000001 00000000-0000-4000-8000-000000000002 00000000-0000-4000-8000-000000000003 00000000-0000-4000-8000-000000000004; do \
+      test -s "/var/cache/fontconfig/$uuid-le64.cache-7"; \
+    done; \
+    for dir in /usr/local/share/fonts /usr/share/fonts /usr/share/fonts/truetype /usr/share/fonts/truetype/dejavu; do \
+      fc-cat "$dir" > /dev/null; \
+    done; \
+    rm -rf /mirror /install.sh /var/lib/apt/lists/*; \
+    rm -f /var/log/alternatives.log /var/log/dpkg.log /var/log/apt/history.log /var/log/apt/term.log /var/cache/ldconfig/aux-cache
 COPY --from=verification /usr/local/lib/ /usr/local/lib/
 COPY --from=verification /imaginary /usr/local/bin/imaginary
 COPY --from=verification /imaginary-build/ /usr/local/share/imaginary-build/
-RUN --network=none ldconfig
+RUN --network=none ldconfig && rm -f /var/cache/ldconfig/aux-cache
 ENV PORT=9000
 USER nobody
 ENTRYPOINT ["/usr/local/bin/imaginary"]
