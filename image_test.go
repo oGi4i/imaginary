@@ -1,9 +1,85 @@
 package main
 
 import (
+	"bytes"
+	"image/png"
 	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 )
+
+func TestWebPInputToPNG(t *testing.T) {
+	buf, err := os.ReadFile("testdata/test.webp")
+	if err != nil {
+		t.Fatal("fixture read failed")
+	}
+	if err := validateRasterSource(buf, defaultMaxSourcePixels); err != nil {
+		t.Fatal("source admission failed")
+	}
+
+	checkPNG := func(t *testing.T, body []byte, width, height int) {
+		t.Helper()
+		config, err := png.DecodeConfig(bytes.NewReader(body))
+		if err != nil {
+			t.Fatal("PNG header decode failed")
+		}
+		if config.Width != width || config.Height != height {
+			t.Fatalf("PNG dimensions = %dx%d, want %dx%d", config.Width, config.Height, width, height)
+		}
+		decoded, err := png.Decode(bytes.NewReader(body))
+		if err != nil {
+			t.Fatal("PNG full decode failed")
+		}
+		if decoded.Bounds().Dx() != width || decoded.Bounds().Dy() != height {
+			t.Fatal("PNG decoded dimensions mismatch")
+		}
+	}
+
+	// Conversion without resizing distinguishes input decoding from resize failures.
+	t.Run("native-convert", func(t *testing.T) {
+		img, err := Convert(buf, ImageOptions{Type: "png"})
+		if err != nil {
+			t.Fatal("native convert failed")
+		}
+		checkPNG(t, img.Body, 550, 368)
+	})
+
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{"native-resize-1x1", 1},
+		{"native-resize-16x16", 16},
+		{"native-resize-300x300", 300},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Match the HTTP request: force and nocrop are not specified.
+			img, err := Resize(buf, ImageOptions{Width: tc.size, Height: tc.size, Type: "png"})
+			if err != nil {
+				t.Fatal("native resize failed")
+			}
+			checkPNG(t, img.Body, tc.size, tc.size)
+		})
+	}
+
+	t.Run("http-resize-1x1", func(t *testing.T) {
+		o := ServerOptions{}
+		LoadSources(o)
+		req := httptest.NewRequest(http.MethodPost, "/resize?width=1&height=1&type=png", bytes.NewReader(buf))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		response := httptest.NewRecorder()
+		imageController(o, Resize)(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatalf("HTTP resize status = %d, want 200", response.Code)
+		}
+		if response.Header().Get("Content-Type") != "image/png" {
+			t.Fatal("HTTP resize content type is not PNG")
+		}
+		checkPNG(t, response.Body.Bytes(), 1, 1)
+	})
+}
 
 func TestImageResize(t *testing.T) {
 	t.Run("Width and Height defined", func(t *testing.T) {

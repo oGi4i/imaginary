@@ -70,6 +70,12 @@ jobs:
         run: |
           go mod download
           go mod verify
+      - name: WebP to PNG native diagnostic
+        if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
+        env:
+          CGO_ENABLED: '1'
+          GOFLAGS: -mod=readonly
+        run: timeout --signal=KILL 60s go test -v -count=1 -timeout=50s -run '^TestWebPInputToPNG$' ./...
       - name: Body limit boundary test
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
