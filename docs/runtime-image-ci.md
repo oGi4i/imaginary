@@ -56,7 +56,12 @@ and candidate, retaining libvips 8.10.0. The changed processing dependency must 
 identified separately from the unchanged published reference; the memory-policy
 comparison remains cache-only. The correction needs hosted native verification.
 Keep the original 1×1 probe and admission controls unchanged. A shared patch helper
-does not establish that the instrumented baseline image was built.
+does not establish that the instrumented baseline image was built. First patched
+run 42486160963 stopped during source-CI staging, and both jobs in 42486160994
+stopped during context preparation with `module identity mismatch`; no patched
+native tests or BuildKit solve ran. The verified original bimg ZIP lacks
+`go.mod`, which the initial staging helper incorrectly required. The correction
+adds only an exact synthetic module declaration to the local replacement.
 
 The remaining description specifies the workflow, not a claim that every step
 completed. The

@@ -6,8 +6,10 @@ The GitHub-hosted Ubuntu 22.04 runner installs build dependencies, verifies the 
 
 The user authorized one exact-hash bimg v1.1.4 WebP correction. After original
 module verification, a shared source-owned helper stages the module and replaces
-only `resizer.go`. Its source identity records original and patched sizes and
-SHA-256 values. A temporary module file selects that exact staged module for all
+only existing file `resizer.go`. Because the original v1.1.4 module ZIP lacks
+`go.mod`, the staged local replacement also needs one exact synthetic module
+declaration. Its source identity records original and patched sizes and SHA-256
+values. A temporary module file selects that exact staged module for all
 tests, race checks, vet and compilation; tracked module files remain unchanged.
 The runtime-image preparer must use the same helper and identity, as must any
 future instrumented upstream-source baseline. A source-side patch is not proof

@@ -27,8 +27,11 @@ satisfying provider edges from authenticated packages and checks the complete
 provider-name union against lock dependencies. It obtains modules
 using the verified Go toolchain with `go.sum` verification and read-only module
 files. The authorized WebP correction uses a staged copy of the verified bimg
-v1.1.4 module. Only `resizer.go` changes; its original and replacement bytes must
-match the exact patch identity. The tracked `go.mod` and `go.sum` stay unchanged.
+v1.1.4 module. Only existing file `resizer.go` changes; its original and replacement
+bytes must match the exact patch identity. The original module ZIP has no
+`go.mod`, so the staged local replacement also needs one fixed, synthetic module
+declaration. No other added or changed module files are permitted. The tracked
+application `go.mod` and `go.sum` stay unchanged.
 A temporary module file permits only the approved local replacement, and tests,
 race checks, vet and compilation must all consume it. `go mod verify` checks the
 original module cache, not a local replacement; staged-file checks provide the

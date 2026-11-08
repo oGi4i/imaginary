@@ -22,6 +22,7 @@ IDENTITY = {
     'patched_sha256': '6dd0a8e838850b54500fad5fd48f4fdd1b014b566093523e2a9a02e342ae4bef',
     'patched_size': 14861,
 }
+MODULE_DESCRIPTOR = b'module github.com/h2non/bimg\n'
 MAX_FILE = 16 * 1024 * 1024
 MAX_TOTAL = 128 * 1024 * 1024
 MAX_FILES = 10000
@@ -90,8 +91,8 @@ def stage(source, module, output, replace_path):
     checked(replacement, identity['patched_size'], identity['patched_sha256'])
     files = tree(module)
     checked(files.get('resizer.go', b''), identity['original_size'], identity['original_sha256'])
-    if not re.search(rb'(?m)^module\s+github\.com/h2non/bimg\s*$', files.get('go.mod', b'')):
-        raise ValueError('module identity mismatch')
+    if 'go.mod' in files:
+        raise ValueError('unexpected module descriptor')
     mod = read_regular(source / 'go.mod')
     sums = read_regular(source / 'go.sum')
     if re.search(rb'(?m)^\s*(replace|toolchain|godebug|work)\b', mod):
@@ -99,6 +100,7 @@ def stage(source, module, output, replace_path):
     if not re.search(rb'(?m)^\s*(?:require\s+)?github\.com/h2non/bimg\s+v1\.1\.4\s*$', mod):
         raise ValueError('unapproved bimg version')
     files['resizer.go'] = replacement
+    files['go.mod'] = MODULE_DESCRIPTOR
     output.mkdir()
     (output / 'module').mkdir()
     for name, data in sorted(files.items()):
@@ -111,6 +113,9 @@ def stage(source, module, output, replace_path):
     lines = [hashlib.sha256(data).hexdigest() + '  module/' + name for name, data in sorted(files.items())]
     (output / 'manifest.sha256').write_text('\n'.join(lines) + '\n')
     original = tree(module)
+    if 'go.mod' in original:
+        raise ValueError('module changed during staging')
+    original['go.mod'] = MODULE_DESCRIPTOR
     original['resizer.go'] = replacement
     if original != tree(output / 'module'):
         raise ValueError('module changed during staging')

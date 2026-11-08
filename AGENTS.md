@@ -6,7 +6,9 @@ use bimg v1.1.4 with only the explicitly authorized, hash-bound WebP resize
 correction. Apply the same correction to the instrumented upstream-source
 baseline and candidate; neither is the unchanged published image. Keep tracked
 `go.mod` and `go.sum` unchanged. Verify the original module before staging the
-single-file replacement and bind its identity into build evidence. Upstream
+single-file replacement and bind its identity into build evidence. The original
+bimg v1.1.4 module ZIP has no `go.mod`; only the exact synthetic module declaration
+may be added for the staged local replacement. Reject other module additions. Upstream
 master is not the reference release. Do not merge an upstream upgrade into this
 experiment.
 

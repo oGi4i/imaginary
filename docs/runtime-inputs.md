@@ -64,8 +64,16 @@ exact candidate bytes manually copied into the tracked lock. Their historical
 SHA-256 is `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
 The separately authorized bimg patch identity changes later lock metadata, not
 those authenticated package rows. A fresh verification must bind the consumed
-lock bytes. The verifier never automatically modifies the tracked lock. This evidence covers
-only the package closure; features remain null and the result is unqualified.
+lock bytes. The verifier never automatically modifies the tracked lock. Run 42486161001 at
+`169a191` reauthenticated the lock with the added bimg patch metadata. Proposal
+artifact 13619597555 contains a semantically identical lock, with different JSON
+serialization. The report binds input-lock SHA-256
+`d03eb990063c7bd030e9c15b04e2e87bcabe954baa90e9eb02d1e6d225053a29`
+and candidate SHA-256
+`4196b6288df97033703a08611dae0483bc2d85d66efc34a0eb17b94f5bbbf15a`.
+Source, tree, workflow and run bindings match. This evidence covers only the
+package closure, not bimg behavior; features remain null and the result is
+unqualified.
 
 For failed offline APT configuration, CI may retain at most eight sanitized
 `E:`/`W:` lines, each capped at 160 characters. URLs, paths, controls and

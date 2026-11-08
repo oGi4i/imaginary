@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +22,6 @@ class BimgPatchTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.module = self.root / 'module'
         self.module.mkdir()
-        (self.module / 'go.mod').write_text('module github.com/h2non/bimg\n')
         (self.module / 'resizer.go').write_bytes(b'original')
         (self.module / 'other.go').write_bytes(b'other')
         self.source = self.root / 'source'
@@ -47,6 +47,10 @@ class BimgPatchTests(unittest.TestCase):
         self.stage()
         self.assertEqual((self.root / 'stage/module/resizer.go').read_bytes(), b'patched')
         self.assertEqual((self.root / 'stage/module/other.go').read_bytes(), b'other')
+        self.assertEqual((self.root / 'stage/module/go.mod').read_bytes(), b'module github.com/h2non/bimg\n')
+        self.assertFalse((self.module / 'go.mod').exists())
+        self.assertIn(hashlib.sha256(b'module github.com/h2non/bimg\n').hexdigest() + '  module/go.mod',
+                      (self.root / 'stage/manifest.sha256').read_text())
         text = (self.root / 'stage/patch.mod').read_text()
         self.assertEqual(text.count('replace '), 1)
         self.assertIn('replace github.com/h2non/bimg => /bimg-patch/module', text)
@@ -96,6 +100,11 @@ class BimgPatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.stage()
 
+    def test_rejects_existing_module_descriptor(self):
+        (self.module / 'go.mod').write_bytes(b'module github.com/h2non/bimg\n')
+        with self.assertRaises(ValueError):
+            self.stage()
+
     def test_regular_file_rejects_symlinks_and_oversize(self):
         link = self.root / 'link'
         link.symlink_to(self.module / 'other.go')
@@ -106,6 +115,10 @@ class BimgPatchTests(unittest.TestCase):
 
     def test_recipe_rejects_every_original_file_mismatch(self):
         recipe = (ROOT / 'Dockerfile').read_text()
+        self.assertIn('test ! -e go.mod', recipe)
+        self.assertIn("printf 'module github.com/h2non/bimg\\n' | cmp - go.mod", recipe)
+        self.assertIn('find . -type f ! -path ./go.mod', recipe)
+        self.assertIn('cmp /tmp/bimg-original-files /tmp/bimg-staged-files', recipe)
         self.assertIn('cmp "$file" "/go/pkg/mod/github.com/h2non/bimg@v1.1.4/$file" || exit 1', recipe)
 
     def test_cli_redacts_errors(self):
@@ -137,6 +150,35 @@ class BimgPatchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 bimg_patch.main()
             stage.assert_not_called()
+
+    def test_cli_runs_fake_go_with_workflow_environment(self):
+        cache = self.root / 'cache'
+        expected = cache / 'github.com/h2non/bimg@v1.1.4'
+        expected.parent.mkdir(parents=True)
+        shutil.copytree(self.module, expected)
+        fake = self.root / 'fake-go'
+        log = self.root / 'calls'
+        fake.write_text(f'''#!{sys.executable} -I
+import os, sys
+assert os.getcwd() == {str(self.source)!r}
+assert os.environ['GOWORK'] == 'off'
+assert os.environ['GOFLAGS'] == '-mod=readonly'
+assert os.environ['GO111MODULE'] == 'on'
+with open({str(log)!r}, 'a') as out:
+    out.write(' '.join(sys.argv[1:]) + '\\n')
+if sys.argv[1:] == ['env', 'GOMODCACHE']:
+    print({str(cache)!r})
+elif sys.argv[1:] != ['mod', 'verify']:
+    sys.exit(1)
+''')
+        fake.chmod(0o755)
+        args = ['bimg_patch.py', '--go', str(fake), '--source', str(self.source),
+                '--module', str(expected), '--output', str(self.root / 'stage'),
+                '--replace-path', '/bimg-patch/module']
+        with patch('sys.argv', args):
+            bimg_patch.main()
+        self.assertEqual((self.root / 'stage/module/go.mod').read_bytes(), b'module github.com/h2non/bimg\n')
+        self.assertEqual(log.read_text().splitlines(), ['env GOMODCACHE', 'mod verify', 'mod verify'])
 
     def test_committed_lock_binds_exact_patch(self):
         lock = json.loads((ROOT / 'docs/runtime-image.lock.yaml').read_text())

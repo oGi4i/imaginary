@@ -36,7 +36,7 @@ FRONTEND = 'docker.io/docker/dockerfile@sha256:dc9e236567481e0aca4c1f52351af213b
 BUILDX_SHA256 = 'b13bee81c3db12a4be7d0b9d042b64d0dd9ed116f7674dfac0ffdf2a71acfe3d'
 GO_SHA256 = 'ff445e48af27f93f66bd949ae060d97991c83e11289009d311f25426258f9c44'
 VIPS_SHA256 = '1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9'
-RECIPE_SHA256 = '1bc9f83cd17906ff46f7205761a21fa0cc80bd20ed455f3c471b9ca3b598c601'
+RECIPE_SHA256 = '0b8ba0619c2f632cc18abdfe5c80abab505ea38807f547ee2d06c44228a226d1'
 VIPS_URL = 'https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz'
 CONFIGURE = ['--disable-debug', '--disable-dependency-tracking', '--disable-introspection',
              '--disable-static', '--enable-gtk-doc-html=no', '--enable-gtk-doc=no', '--enable-pyvips8=no']

@@ -26,8 +26,9 @@ COPY inputs/bimg-patch/ /bimg-patch/
 FROM builder AS verification
 RUN --network=none go mod verify && \
     cd /bimg-patch && sha256sum -c manifest.sha256 && \
-    cd /go/pkg/mod/github.com/h2non/bimg@v1.1.4 && find . -type f | LC_ALL=C sort > /tmp/bimg-original-files && \
-    cd /bimg-patch/module && find . -type f | LC_ALL=C sort > /tmp/bimg-staged-files && \
+    cd /go/pkg/mod/github.com/h2non/bimg@v1.1.4 && test ! -e go.mod && find . -type f | LC_ALL=C sort > /tmp/bimg-original-files && \
+    cd /bimg-patch/module && printf 'module github.com/h2non/bimg\n' | cmp - go.mod && \
+    find . -type f ! -path ./go.mod | LC_ALL=C sort > /tmp/bimg-staged-files && \
     cmp /tmp/bimg-original-files /tmp/bimg-staged-files && \
     while IFS= read -r file; do if [ "$file" != ./resizer.go ]; then cmp "$file" "/go/pkg/mod/github.com/h2non/bimg@v1.1.4/$file" || exit 1; fi; done < /tmp/bimg-original-files && \
     cd /src && \

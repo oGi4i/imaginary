@@ -33,8 +33,10 @@ hosted verification; arithmetic checks alone do not establish equivalence.
 ## Build contract
 
 Keep the tracked `go.mod` and `go.sum` unchanged and verify original modules
-before staging. The shared runtime-image patch helper must reject identity or
-source mismatches, replace only this file, and bind the staged module and temporary
+before staging. The original v1.1.4 ZIP has no `go.mod`; the local replacement
+therefore also needs an exact synthetic module declaration. The shared patch
+helper must reject identity or source mismatches, replace only `resizer.go`, add
+only that fixed declaration, and bind the staged module and temporary application
 module file into build evidence. Every test, race, vet and binary-build command
 must select the same approved replacement. Module-cache verification does not
 verify a local replacement; the staged-file checks are separate.
