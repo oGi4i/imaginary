@@ -9,6 +9,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,7 +18,7 @@ verify = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(verify)
 
 
-def image(path, layer=b'layer', *, bad_digest=False, extra=None, compression='', diff_id=None, payload=None):
+def image(path, layer=b'layer', *, bad_digest=False, extra=None, compression='', diff_id=None, payload=None, second_layer=None):
     blobs = {}
 
     def blob(data, media_type):
@@ -29,9 +30,14 @@ def image(path, layer=b'layer', *, bad_digest=False, extra=None, compression='',
     if payload is not None:
         compressed = payload
     layer_desc = blob(compressed, 'application/vnd.oci.image.layer.v1.tar' + compression)
-    config = json.dumps({'architecture': 'amd64', 'os': 'linux', 'rootfs': {'type': 'layers', 'diff_ids': [diff_id or 'sha256:' + hashlib.sha256(layer).hexdigest()]}}, sort_keys=True).encode()
+    layers = [layer_desc]
+    diff_ids = [diff_id or 'sha256:' + hashlib.sha256(layer).hexdigest()]
+    if second_layer is not None:
+        layers.append(blob(second_layer, 'application/vnd.oci.image.layer.v1.tar'))
+        diff_ids.append('sha256:' + hashlib.sha256(second_layer).hexdigest())
+    config = json.dumps({'architecture': 'amd64', 'os': 'linux', 'rootfs': {'type': 'layers', 'diff_ids': diff_ids}}, sort_keys=True).encode()
     config_desc = blob(config, 'application/vnd.oci.image.config.v1+json')
-    manifest = json.dumps({'schemaVersion': 2, 'mediaType': 'application/vnd.oci.image.manifest.v1+json', 'config': config_desc, 'layers': [layer_desc]}, sort_keys=True).encode()
+    manifest = json.dumps({'schemaVersion': 2, 'mediaType': 'application/vnd.oci.image.manifest.v1+json', 'config': config_desc, 'layers': layers}, sort_keys=True).encode()
     manifest_desc = blob(manifest, 'application/vnd.oci.image.manifest.v1+json')
     manifest_desc['platform'] = {'architecture': 'amd64', 'os': 'linux'}
     index = json.dumps({'schemaVersion': 2, 'manifests': [manifest_desc]}).encode()
@@ -45,6 +51,119 @@ def image(path, layer=b'layer', *, bad_digest=False, extra=None, compression='',
             member = tarfile.TarInfo(name)
             member.size = len(data)
             archive.addfile(member, io.BytesIO(data))
+
+
+class LoadTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('image_load', ROOT / 'tooling/runtime-image/image_load.py')
+        self.load = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.load)
+
+    def test_raw_and_gzip_preserve_config_and_layer(self):
+        for compression in ('', '+gzip'):
+            with self.subTest(compression=compression), tempfile.TemporaryDirectory() as temp:
+                source, output = Path(temp) / 'oci.tar', Path(temp) / 'docker.tar'
+                image(source, compression=compression)
+                identity = self.load.convert(source, output, 'runtime-experiment:one')
+                with tarfile.open(source) as oci, tarfile.open(output) as docker:
+                    manifest = json.load(docker.extractfile('manifest.json'))[0]
+                    self.assertEqual(manifest['RepoTags'], ['runtime-experiment:one'])
+                    self.assertEqual(docker.extractfile(manifest['Config']).read(), oci.extractfile('blobs/sha256/' + identity['config'][7:]).read())
+                    self.assertEqual(docker.extractfile(manifest['Layers'][0]).read(), b'layer')
+                self.assertEqual(identity['diff_ids'], ['sha256:' + hashlib.sha256(b'layer').hexdigest()])
+
+    def test_layer_order_and_aggregate_limit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, output = Path(temp) / 'oci.tar', Path(temp) / 'docker.tar'
+            image(source, compression='+gzip', second_layer=b'second')
+            identity = self.load.convert(source, output, 'runtime-experiment:two')
+            with tarfile.open(output) as archive:
+                manifest = json.load(archive.extractfile('manifest.json'))[0]
+                self.assertEqual([archive.extractfile(name).read() for name in manifest['Layers']], [b'layer', b'second'])
+            self.assertEqual(identity['diff_ids'], ['sha256:' + hashlib.sha256(data).hexdigest() for data in (b'layer', b'second')])
+            output.unlink()
+            self.load.MAX_OUTPUT = 1024
+            with self.assertRaises(ValueError):
+                self.load.convert(source, output, 'runtime-experiment:two')
+            self.assertEqual(set(Path(temp).iterdir()), {source})
+
+    def test_duplicate_and_oversized_input(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, output = Path(temp) / 'oci.tar', Path(temp) / 'docker.tar'
+            image(source)
+            self.load.verify.MAX_ARCHIVE = 1
+            with self.assertRaises(ValueError):
+                self.load.convert(source, output, 'runtime-experiment:one')
+            self.load.verify.MAX_ARCHIVE = 4 * 1024 * 1024 * 1024
+            with tarfile.open(source, 'a') as archive:
+                member = tarfile.TarInfo('index.json')
+                member.size = 2
+                archive.addfile(member, io.BytesIO(b'{}'))
+            with self.assertRaises(ValueError):
+                self.load.convert(source, output, 'runtime-experiment:one')
+            self.assertEqual(set(Path(temp).iterdir()), {source})
+
+    def test_reject_bad_archives_without_output_or_temp(self):
+        for kwargs in ({'bad_digest': True}, {'diff_id': 'sha256:' + '1' * 64}, {'compression': '+zstd'}, {'compression': '+gzip', 'payload': gzip.compress(b'layer')[:-3]}, {'extra': {'../escape': b'x'}}):
+            with self.subTest(kwargs=kwargs), tempfile.TemporaryDirectory() as temp:
+                source, output = Path(temp) / 'oci.tar', Path(temp) / 'docker.tar'
+                image(source, **kwargs)
+                with self.assertRaises((ValueError, OSError, tarfile.TarError, EOFError)):
+                    self.load.convert(source, output, 'runtime-experiment:one')
+                self.assertEqual(set(Path(temp).iterdir()), {source})
+
+    def test_existing_output_not_overwritten_including_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, output = Path(temp) / 'oci.tar', Path(temp) / 'docker.tar'
+            image(source)
+            output.write_bytes(b'existing')
+            with self.assertRaises(FileExistsError):
+                self.load.convert(source, output, 'runtime-experiment:one')
+            self.assertEqual(output.read_bytes(), b'existing')
+            output.unlink()
+            output.symlink_to('missing')
+            with self.assertRaises(FileExistsError):
+                self.load.convert(source, output, 'runtime-experiment:one')
+            self.assertTrue(output.is_symlink())
+
+    def test_mutated_consumed_blob_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, output = Path(temp) / 'oci.tar', Path(temp) / 'docker.tar'
+            image(source)
+            original = self.load.verify.inspect
+
+            def mutate(path, *, _validated):
+                def callback(archive, entries, config, layers, identity):
+                    member = entries['blobs/sha256/' + layers[0]['digest'][7:]]
+                    with open(source, 'r+b') as stream:
+                        stream.seek(member.offset_data)
+                        stream.write(b'WRONG')
+                    _validated(archive, entries, config, layers, identity)
+                return original(path, _validated=callback)
+
+            with mock.patch.object(self.load.verify, 'inspect', mutate):
+                with self.assertRaises(ValueError):
+                    self.load.convert(source, output, 'runtime-experiment:one')
+            self.assertEqual(set(Path(temp).iterdir()), {source})
+
+    def test_loaded_identity_checks_config_rootfs_and_platform(self):
+        expected = {'config': 'sha256:' + '1' * 64, 'diff_ids': ['sha256:' + '2' * 64]}
+        inspect = {'Id': expected['config'], 'RootFS': {'Layers': expected['diff_ids']}, 'Os': 'linux', 'Architecture': 'amd64'}
+        self.load.validate_loaded(expected, [inspect])
+        for field, wrong in [('Id', 'sha256:' + '3' * 64), ('RootFS', {'Layers': []}), ('Os', 'windows'), ('Architecture', 'arm64')]:
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.load.validate_loaded(expected, [{**inspect, field: wrong}])
+
+    def test_workflow_gates_runtime_on_loaded_identity(self):
+        workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()
+        convert = workflow.index('image_load.py convert')
+        load = workflow.index('docker load -i "$RUNNER_TEMP/docker-load.tar"')
+        identity = workflow.index('image_load.py validate-loaded')
+        probe = workflow.index('docker run --name "$checks"')
+        self.assertLess(convert, load)
+        self.assertLess(load, identity)
+        self.assertLess(identity, probe)
+        self.assertNotIn('docker load -i "$RUNNER_TEMP/evidence/artifact/image.oci.tar"', workflow)
 
 
 class ImageTests(unittest.TestCase):

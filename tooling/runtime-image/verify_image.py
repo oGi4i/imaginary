@@ -8,6 +8,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import struct
@@ -43,12 +44,13 @@ def _json(data):
     return value
 
 
-def inspect(path):
+def inspect(path, *, _validated=None):
     """Return identities of the single amd64 OCI manifest and its objects."""
-    if path.stat().st_size > MAX_ARCHIVE:
-        raise ValueError('archive exceeds size limit')
     entries = {}
-    with tarfile.open(path, 'r:') as archive:
+    names = set()
+    with open(path, 'rb') as source, tarfile.open(fileobj=source, mode='r:') as archive:
+        if os.fstat(source.fileno()).st_size > MAX_ARCHIVE:
+            raise ValueError('archive exceeds size limit')
         for member in archive:
             name = member.name
             while name.startswith('./'):
@@ -57,12 +59,13 @@ def inspect(path):
             if (not name or name.startswith('/') or '..' in parts or '\\' in name
                     or len(parts) > 3):
                 raise ValueError('unsafe archive path')
+            if name in names or len(names) >= MAX_ENTRIES:
+                raise ValueError('duplicate or excessive archive entries')
+            names.add(name)
             if member.isdir():
                 continue
             if not member.isfile() or member.issym() or member.islnk():
                 raise ValueError('archive entry is not a regular file')
-            if name in entries or len(entries) >= MAX_ENTRIES:
-                raise ValueError('duplicate or excessive archive entries')
             if member.size > MAX_BLOB:
                 raise ValueError('archive entry exceeds size limit')
             entries[name] = member
@@ -155,8 +158,11 @@ def inspect(path):
                 raise ValueError('invalid compressed layer') from exc
             if 'sha256:' + hasher.hexdigest() != expected:
                 raise ValueError('uncompressed layer digest mismatch')
-        return {'manifest': selected['digest'], 'config': config_desc['digest'],
-                'layers': layer_digests, 'diff_ids': rootfs['diff_ids']}
+        identity = {'manifest': selected['digest'], 'config': config_desc['digest'],
+                    'layers': layer_digests, 'diff_ids': rootfs['diff_ids']}
+        if _validated is not None:
+            _validated(archive, entries, config_desc, layers, identity)
+        return identity
 
 
 def image_dimensions(data, kind):

@@ -184,7 +184,10 @@ jobs:
           epoch=$(python3 -I -c 'import json; print(json.load(open("docs/runtime-image.lock.yaml"))["build"]["source_date_epoch"])')
           case "$epoch" in ''|*[!0-9]*) exit 1;; esac
           timeout -k 10 3600 docker buildx build --builder "$builder" --platform linux/amd64 --target runtime --no-cache --provenance=false --sbom=false --build-arg "SOURCE_DATE_EPOCH=$epoch" --output "type=oci,dest=$RUNNER_TEMP/evidence/artifact/image.oci.tar,name=$tag,rewrite-timestamp=true" "$RUNNER_TEMP/runtime-context"
-          timeout -k 10 300 docker load -i "$RUNNER_TEMP/evidence/artifact/image.oci.tar"
+          timeout -k 10 600 python3 -I -B tooling/runtime-image/image_load.py convert --oci "$RUNNER_TEMP/evidence/artifact/image.oci.tar" --output "$RUNNER_TEMP/docker-load.tar" --tag "$tag" > "$RUNNER_TEMP/evidence/artifact/oci-load-identity.json"
+          timeout -k 10 300 docker load -i "$RUNNER_TEMP/docker-load.tar"
+          timeout -k 10 30 docker image inspect "$tag" > "$RUNNER_TEMP/loaded-image.json"
+          timeout -k 10 30 python3 -I -B tooling/runtime-image/image_load.py validate-loaded --expected "$RUNNER_TEMP/evidence/artifact/oci-load-identity.json" --inspect "$RUNNER_TEMP/loaded-image.json"
           test "$(docker image inspect "$tag" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
           test "$(docker image inspect "$tag" --format '{{.Config.User}}')" = nobody
           test "$(docker image inspect "$tag" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/imaginary"]'

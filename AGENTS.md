@@ -73,8 +73,13 @@ The locked offline recipe and context preparer are source-only build preparation
 see `docs/runtime-build.md`. The two-build experiment uses an approved privileged
 pinned BuildKit daemon on disposable GitHub-hosted VMs and checks the daemon and
 nested RUN contract before building; see `docs/runtime-image-ci.md`. The VM is
-its security boundary, not the privileged daemon. Actual CI execution is pending.
-Source tests and builder feature evidence cannot establish runtime/reference
+its security boundary, not the privileged daemon. Run 42427631572 passed the
+builder contract and exported both OCI images, then failed because classic Docker
+could not load the OCI archives. A bounded converter now preserves the exported
+config bytes and layer DiffIDs in Docker load format; runtime checks must verify
+the loaded config digest and ordered DiffIDs against that exact conversion.
+Actual import and runtime checks remain unverified. Source tests and builder
+feature evidence cannot establish runtime/reference
 loader parity or qualify memory.
 
 ## Verification and limits

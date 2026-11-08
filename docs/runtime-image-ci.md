@@ -18,7 +18,19 @@ The disposable VM is the security boundary. A compromised build may control the
 VM and its ephemeral GitHub credentials. The experiment has no private credentials,
 registry publication or cluster access. It uploads one OCI artifact per build and
 compares content-addressed objects in a third job. An artifact is not production
-approval or a memory bound. Actual CI execution of this implementation is pending.
+approval or a memory bound. Actual run 42427631572 passed the daemon and RUN
+contract, built the runtime and exported OCI archives in both jobs. Classic Docker
+then rejected the OCI layout during `docker load`; runtime checks and comparison
+did not run, and no image artifacts were retained. The exported config and manifest
+digests differed across jobs, so reproducibility is not established.
+
+The import path now converts the exact validated OCI archive to Docker load
+format without a second build. It preserves config bytes, streams bounded raw or
+gzip layers, and verifies the ordered uncompressed DiffIDs. It does not extract
+layer files or execute archive contents. After load, Docker's image config digest
+and ordered layer DiffIDs must match the conversion identity before any runtime
+probe. The original OCI archive remains the artifact and SBOM input; the temporary
+Docker archive is not published. Actual import/runtime success remains pending.
 
 The remaining description is the proposed path, not evidence of execution. The
 lock now contains the reviewed authenticated package

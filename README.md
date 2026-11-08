@@ -71,8 +71,12 @@ The [offline recipe and preparer](docs/runtime-build.md) and
 [two-build experiment](docs/runtime-image-ci.md) are source preparation, not
 completed images. The approved experiment checks the pinned privileged BuildKit
 daemon and its nested RUN contract on disposable GitHub-hosted VMs. The VM is the
-security boundary; actual CI execution is pending. Approval does not establish
-runtime/reference feature parity or a memory bound.
+security boundary. Run 42427631572 passed that contract and exported both OCI
+images, then failed at Docker import. The proposed load path converts those exact
+archives and checks loaded config/layer identities before runtime probes; its
+hosted success remains pending. The exported digests differed, so reproducibility
+is not established. Approval does not establish runtime/reference feature parity
+or a memory bound.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image
