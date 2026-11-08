@@ -48,7 +48,7 @@ def inspect(path, *, _validated=None):
     """Return identities of the single amd64 OCI manifest and its objects."""
     entries = {}
     names = set()
-    with open(path, 'rb') as source, tarfile.open(fileobj=source, mode='r:') as archive:
+    with open(path, 'rb', buffering=0) as source, tarfile.open(fileobj=source, mode='r:') as archive:
         if os.fstat(source.fileno()).st_size > MAX_ARCHIVE:
             raise ValueError('archive exceeds size limit')
         for member in archive:
