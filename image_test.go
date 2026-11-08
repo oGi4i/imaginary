@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"image"
+	"image/color"
+	"image/draw"
 	"image/png"
 	"io/ioutil"
 	"net/http"
@@ -79,6 +82,102 @@ func TestWebPInputToPNG(t *testing.T) {
 		}
 		checkPNG(t, response.Body.Bytes(), 1, 1)
 	})
+}
+
+func syntheticWebP(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	source := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(source, source.Bounds(), &image.Uniform{C: color.RGBA{R: 240, G: 220, B: 30, A: 255}}, image.Point{}, draw.Src)
+	draw.Draw(source, image.Rect(0, 0, (width+1)/2, (height+1)/2), &image.Uniform{C: color.RGBA{R: 20, G: 40, B: 220, A: 255}}, image.Point{}, draw.Src)
+	if err := png.Encode(&buf, source); err != nil {
+		t.Fatal("synthetic PNG encode failed")
+	}
+	if err := validateRasterSource(buf.Bytes(), defaultMaxSourcePixels); err != nil {
+		t.Fatal("synthetic PNG admission failed")
+	}
+	img, err := Convert(buf.Bytes(), ImageOptions{Type: "webp"})
+	if err != nil {
+		t.Fatal("synthetic WebP conversion failed")
+	}
+	if err := validateRasterSource(img.Body, defaultMaxSourcePixels); err != nil {
+		t.Fatal("synthetic WebP admission failed")
+	}
+	return img.Body
+}
+
+func checkWebPResizePNG(t *testing.T, buf []byte, width, height int) {
+	t.Helper()
+	// Resize sets Embed=true; Force remains false, as with default HTTP options.
+	img, err := Resize(buf, ImageOptions{Width: width, Height: height, Type: "png"})
+	if err != nil {
+		t.Fatal("native WebP resize failed")
+	}
+	decoded, err := png.Decode(bytes.NewReader(img.Body))
+	if err != nil {
+		t.Fatal("PNG full decode failed")
+	}
+	if decoded.Bounds().Dx() != width || decoded.Bounds().Dy() != height {
+		t.Fatalf("PNG dimensions = %dx%d, want %dx%d", decoded.Bounds().Dx(), decoded.Bounds().Dy(), width, height)
+	}
+}
+
+func TestSyntheticWebPResizePreservesContent(t *testing.T) {
+	buf := syntheticWebP(t, 512, 512)
+	img, err := Resize(buf, ImageOptions{Width: 16, Height: 16, Type: "png"})
+	if err != nil {
+		t.Fatal("native WebP resize failed")
+	}
+	decoded, err := png.Decode(bytes.NewReader(img.Body))
+	if err != nil {
+		t.Fatal("PNG full decode failed")
+	}
+	if decoded.Bounds().Dx() != 16 || decoded.Bounds().Dy() != 16 {
+		t.Fatal("PNG decoded dimensions mismatch")
+	}
+	blueR, _, blueB, _ := decoded.At(2, 2).RGBA()
+	yellowR, _, yellowB, _ := decoded.At(13, 13).RGBA()
+	if blueB <= blueR+10000 || yellowR <= yellowB+10000 {
+		t.Fatal("PNG content markers missing")
+	}
+}
+
+func TestSyntheticWebPResizeToPNG(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		sourceWidth, sourceHeight int
+		width, height             int
+	}{
+		{"portrait-small", 513, 1025, 1, 1},
+		{"portrait-rounded", 513, 1025, 17, 17},
+		{"thin-vertical", 1, 256, 1, 16},
+		{"thin-horizontal", 256, 1, 16, 1},
+		{"thin-vertical-max-webp", 1, 16383, 1, 16},
+		{"thin-horizontal-max-webp", 16383, 1, 16, 1},
+		{"rounding-below", 257, 129, 15, 15},
+		{"rounding-above", 257, 129, 16, 16},
+		// For bicubic, floor(shrink * 3/4) crosses the 1024 preload limit.
+		{"preload-1023", 1364, 1364, 1, 1},
+		{"preload-1024", 1366, 1366, 1, 1},
+		{"preload-1025", 1367, 1367, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := syntheticWebP(t, tc.sourceWidth, tc.sourceHeight)
+			checkWebPResizePNG(t, buf, tc.width, tc.height)
+		})
+	}
+}
+
+func TestMalformedWebPThenResize(t *testing.T) {
+	buf := syntheticWebP(t, 128, 128)
+	malformed := buf[:12]
+	if err := validateRasterSource(malformed, defaultMaxSourcePixels); err == nil {
+		t.Fatal("malformed WebP passed admission")
+	}
+	if _, err := Resize(malformed, ImageOptions{Width: 16, Height: 16, Type: "png"}); err == nil {
+		t.Fatal("malformed WebP resize succeeded")
+	}
+	checkWebPResizePNG(t, buf, 16, 16)
 }
 
 func TestImageResize(t *testing.T) {

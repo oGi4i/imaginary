@@ -6,9 +6,13 @@ pass. The lock now records reviewed authenticated package closures and keyring
 size; `features` remains null. Source CI 42404371864 passed and the authentication
 step in run 42404371869 succeeded. Reviewed proposal artifact 13586846705 supplied
 candidate SHA-256 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
-The verifier never automatically modifies the lock; these bytes were copied manually.
+That historical digest predates the authorized bimg patch metadata. The verifier
+never automatically modifies the lock; the authenticated package bytes were
+copied manually.
 This evidence covers only the package closure, not reference parity, image
-reproducibility or memory qualification. The BuildKit privilege gate remains closed.
+reproducibility or memory qualification. The user approved the exact hosted
+BuildKit daemon and nested RUN contract; actual builds passed that gate and later
+failed the small-target WebP regression. See [runtime image CI](runtime-image-ci.md).
 
 `tooling/runtime-image/build.py` accepts `--lock`, `--closure`, `--discovery`,
 `--keyring`, `--source`, `--output`, `--commit`, `--tree`, `--recipe-sha256`,
@@ -22,12 +26,23 @@ metadata, and compares the concrete roots with the lock. It recomputes all
 satisfying provider edges from authenticated packages and checks the complete
 provider-name union against lock dependencies. It obtains modules
 using the verified Go toolchain with `go.sum` verification and read-only module
-files. The context uses normalized timestamps and an offline Dockerfile.
+files. The authorized WebP correction uses a staged copy of the verified bimg
+v1.1.4 module. Only `resizer.go` changes; its original and replacement bytes must
+match the exact patch identity. The tracked `go.mod` and `go.sum` stay unchanged.
+A temporary module file permits only the approved local replacement, and tests,
+race checks, vet and compilation must all consume it. `go mod verify` checks the
+original module cache, not a local replacement; staged-file checks provide the
+separate binding. The context uses normalized timestamps and an offline Dockerfile.
+
+The same source-owned patch helper and identity are required for any instrumented
+upstream-source baseline. No instrumented baseline image builder or successful
+patched image is established by this preparation. libvips remains 8.10.0, and
+neither patched role substitutes for the unchanged published reference.
 
 The BuildKit and frontend digests and buildx artifact hash are checked during
-preparation. Preparation does not yet enforce the builder used by the caller;
-do not run the recipe until the workflow enforces the verified builder and
-buildx identities. Provenance must separately record the source commit, tree,
+preparation. The approved workflow also enforces the actual daemon configuration
+and nested RUN contract before building. Preparation alone does not enforce the
+caller's builder; do not bypass those workflow checks. Provenance must separately record the source commit, tree,
 recipe and workflow hashes and the actual tool identities. The build must run
 only on the approved GitHub-hosted CI jobs and must not publish an image.
 

@@ -8,6 +8,7 @@ on:
       - 'Dockerfile'
       - 'docs/runtime-image.lock.yaml'
       - 'tooling/runtime-image/**'
+      - 'patches/bimg-v1.1.4-webp/**'
       - 'tests/runtime-image/**'
       - 'go.mod'
       - 'go.sum'
@@ -196,6 +197,10 @@ jobs:
           timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/builder-vips.txt" "$RUNNER_TEMP/evidence/artifact/builder-vips.txt"
           timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/artifact-sha256.txt" "$RUNNER_TEMP/evidence/artifact/builder-artifacts.sha256"
           timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/artifact-symlinks.txt" "$RUNNER_TEMP/evidence/artifact/builder-symlinks.txt"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/bimg-patch-identity.json" "$RUNNER_TEMP/evidence/artifact/bimg-patch-identity.json"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/bimg-patch-manifest.sha256" "$RUNNER_TEMP/evidence/artifact/bimg-patch-manifest.sha256"
+          cmp "$RUNNER_TEMP/runtime-context/inputs/bimg-patch/identity.json" "$RUNNER_TEMP/evidence/artifact/bimg-patch-identity.json"
+          cmp "$RUNNER_TEMP/runtime-context/inputs/bimg-patch/manifest.sha256" "$RUNNER_TEMP/evidence/artifact/bimg-patch-manifest.sha256"
           timeout -k 10 120 docker run --name "$inventory" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'dpkg-query -W; getconf GNU_LIBC_VERSION; ldd /usr/local/bin/imaginary; ldd /usr/local/lib/libvips.so.42' > "$RUNNER_TEMP/evidence/artifact/runtime-inventory.txt"
           timeout -k 10 120 docker run --name "$artifact_checks" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'sha256sum /usr/local/bin/imaginary | awk '\''{print $1 "  imaginary"}'\''; find /usr/local/lib -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum' > "$RUNNER_TEMP/evidence/artifact/runtime-artifacts.sha256"
           cmp "$RUNNER_TEMP/evidence/artifact/builder-artifacts.sha256" "$RUNNER_TEMP/evidence/artifact/runtime-artifacts.sha256"

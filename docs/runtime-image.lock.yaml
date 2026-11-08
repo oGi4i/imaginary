@@ -8995,6 +8995,15 @@
     }
   },
   "source": {
+    "bimg_patch": {
+      "module": "github.com/h2non/bimg",
+      "version": "v1.1.4",
+      "source_url": "https://raw.githubusercontent.com/h2non/bimg/v1.1.4/resizer.go",
+      "original_sha256": "4897d4105655308bb8235132f057753b718facd1368b11c867ee28d14c16802f",
+      "original_size": 14111,
+      "patched_sha256": "6dd0a8e838850b54500fad5fd48f4fdd1b014b566093523e2a9a02e342ae4bef",
+      "patched_size": 14861
+    },
     "bimg_version": "1.1.4",
     "upstream_commit": "9357624e976790905f1b1bf4d059f8643c21e6fb"
   }

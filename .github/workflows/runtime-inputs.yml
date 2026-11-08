@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/runtime-inputs.yml'
       - 'tooling/runtime-image/**'
+      - 'patches/bimg-v1.1.4-webp/**'
       - 'tests/runtime-image/**'
       - 'docs/runtime-inputs.md'
       - 'docs/runtime-image.lock.yaml'

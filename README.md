@@ -21,8 +21,10 @@ To get started, take a look the [installation](#installation) steps, [usage](#co
 
 ## Native-memory candidate fork
 
-This fork starts from upstream v1.2.4 and keeps bimg v1.1.4 and libvips
-8.10.0 as the comparison baseline. The `mitigate-native-memory` branch adds
+This fork starts from upstream v1.2.4 and libvips 8.10.0. The user authorized
+one hash-bound WebP resize correction to bimg v1.1.4 for both the instrumented
+upstream-source baseline and candidate. Those patched builds must remain distinct
+from the unchanged published image. The `mitigate-native-memory` branch adds
 regression tests and [GitHub Actions checks](docs/ci.md). Startup disables the
 libvips operation cache after bimg initialization, before requests are accepted.
 It does not add allocator trimming. One shared gate allows
@@ -57,8 +59,9 @@ They do not build an image; see [candidate image](docs/candidate-image.md).
 The [runtime-input discovery](docs/runtime-inputs.md) workflow authenticated the
 package closure after a pinned replay. Source CI 42404371864 passed and the
 verifier step in run 42404371869 succeeded. Reviewed proposal artifact 13586846705
-supplied the manually populated lock, SHA-256
+supplied the initially populated lock, SHA-256
 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+That historical digest predates the authorized bimg patch metadata.
 The verifier never automatically modifies the tracked lock. This evidence covers
 only the package closure; features remain null. It does not produce a candidate
 image or establish reproducibility. The independent [published-reference inventory](docs/reference-inventory.md)
@@ -68,15 +71,19 @@ The lock mapper preserves requested roots in closure evidence and records concre
 installed roots in the populated lock; the build preparer independently checks
 those roots against authenticated metadata. See [runtime-input discovery](docs/runtime-inputs.md).
 The [offline recipe and preparer](docs/runtime-build.md) and
-[two-build experiment](docs/runtime-image-ci.md) are source preparation, not
-completed images. The approved experiment checks the pinned privileged BuildKit
-daemon and its nested RUN contract on disposable GitHub-hosted VMs. The VM is the
-security boundary. Run 42427631572 passed that contract and exported both OCI
-images, then failed at Docker import. The proposed load path converts those exact
-archives and checks loaded config/layer identities before runtime probes; its
-hosted success remains pending. The exported digests differed, so reproducibility
-is not established. Approval does not establish runtime/reference feature parity
-or a memory bound.
+[two-build experiment](docs/runtime-image-ci.md) do not establish a qualified
+image. The experiment checks the pinned privileged BuildKit daemon and its nested
+RUN contract on disposable GitHub-hosted VMs. The VM is the security boundary.
+Run 42431858481 loaded the exact exported OCI images and passed config/DiffID
+identity and native/library checks. Full PNG 1×1 probes passed for JPEG and PNG
+inputs; the WebP probe returned HTTP 400. No image artifacts were retained and
+comparison was skipped. Tests-only commit `00f2d28` reproduced the small WebP
+resize failures in source CI 42433576835 and pinned-image CI 42433576851. The
+[experiment notes](docs/runtime-image-ci.md) describe the evidence and a likely,
+unconfirmed bimg cause. The authorized correction preserves the original module
+pins and records the changed source separately; hosted verification is still
+required. Earlier exports differed; reproducibility remains unproven.
+These results do not establish runtime/reference feature parity or a memory bound.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image

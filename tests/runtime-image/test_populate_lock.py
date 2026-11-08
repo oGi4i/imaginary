@@ -20,7 +20,7 @@ def fixture():
             'runtime_image': 'docker.io/library/debian@' + BASE,
             'build_roots': ['a'], 'runtime_roots': ['a'],
             'build_packages': None, 'runtime_packages': None,
-            'features': None, 'source': {'unchanged': True}, 'snapshot': {'date': '20240408T000000Z'}}
+            'features': None, 'source': {'bimg_patch': {'identity': 'synthetic'}}, 'snapshot': {'date': '20240408T000000Z'}}
     package = {'Package': 'a', 'Version': '1', 'Architecture': 'amd64',
                'Filename': 'pool/a.deb', 'Size': '12', 'SHA256': HASH}
     row = {'repository': 'main', 'package': package,
@@ -42,7 +42,7 @@ class CommittedLockTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[2] / 'docs/runtime-image.lock.yaml'
         data = path.read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(),
-                         'f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c')
+                         'd03eb990063c7bd030e9c15b04e2e87bcabe954baa90e9eb02d1e6d225053a29')
         lock = json.loads(data)
         self.assertIsNone(lock['features'])
         for kind, package_count, root_count, fft in (

@@ -35,7 +35,7 @@ func replaceOnce(t *testing.T, in, old, replacement string) string {
 // V2 values are synthetic and do not constitute authenticated evidence.
 const completeV2 = `{
   "schema_version": 2,
-  "source": {"upstream_commit":"9357624e976790905f1b1bf4d059f8643c21e6fb","bimg_version":"1.1.4"},
+  "source": {"upstream_commit":"9357624e976790905f1b1bf4d059f8643c21e6fb","bimg_version":"1.1.4","bimg_patch":{"module":"github.com/h2non/bimg","version":"v1.1.4","source_url":"https://raw.githubusercontent.com/h2non/bimg/v1.1.4/resizer.go","original_sha256":"4897d4105655308bb8235132f057753b718facd1368b11c867ee28d14c16802f","original_size":14111,"patched_sha256":"6dd0a8e838850b54500fad5fd48f4fdd1b014b566093523e2a9a02e342ae4bef","patched_size":14861}},
   "libvips": {"version":"8.10.0","archive_url":"https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz","archive_sha256":"1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9"},
   "platform":"linux/amd64",
   "builder_image":"example.test/base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -102,6 +102,10 @@ func TestValidateV2(t *testing.T) {
 		t.Fatalf("incomplete v2: missing=%v err=%v", missing, err)
 	}
 	for _, tc := range [][2]string{
+		{`"bimg_patch":{`, `"bimg_patch":{"unknown":1,`},
+		{`"original_size":14111`, `"original_size":14112`},
+		{`"patched_size":14861`, `"patched_size":null`},
+		{`6dd0a8e838850b54500fad5fd48f4fdd1b014b566093523e2a9a02e342ae4bef`, `7dd0a8e838850b54500fad5fd48f4fdd1b014b566093523e2a9a02e342ae4bef`},
 		{`https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz`, `https://example.test/other.tar.gz`},
 		{`20240408T000000Z`, `20249999T999999Z`},
 		{`example.test/base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, `debian/bookworm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`},

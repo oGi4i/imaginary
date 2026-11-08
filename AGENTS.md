@@ -1,9 +1,14 @@
 # Imaginary native-memory candidate
 
-This fork develops a cache-only candidate from upstream v1.2.4, commit
-`9357624e976790905f1b1bf4d059f8643c21e6fb`. Keep bimg at v1.1.4 and
-libvips at 8.10.0 while comparing behavior. Upstream master is not the
-reference release. Do not merge an upstream upgrade into this experiment.
+This fork develops a cache-only memory candidate from upstream v1.2.4, commit
+`9357624e976790905f1b1bf4d059f8643c21e6fb`. Keep libvips at 8.10.0 and
+use bimg v1.1.4 with only the explicitly authorized, hash-bound WebP resize
+correction. Apply the same correction to the instrumented upstream-source
+baseline and candidate; neither is the unchanged published image. Keep tracked
+`go.mod` and `go.sum` unchanged. Verify the original module before staging the
+single-file replacement and bind its identity into build evidence. Upstream
+master is not the reference release. Do not merge an upstream upgrade into this
+experiment.
 
 ## Implementation flow
 
@@ -64,8 +69,9 @@ resolves them from authenticated package rows. Neither step claims an APT choice
 The discovery verifier requires an exact pinned closure replay and authenticates
 package evidence before publishing an unqualified candidate lock and identity-bound
 report. Source CI 42404371864 passed; the verifier step in run 42404371869
-succeeded. Reviewed proposal artifact 13586846705 supplied the manually populated
+succeeded. Reviewed proposal artifact 13586846705 supplied the initially populated
 lock, SHA-256 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+That historical digest predates the separately authorized bimg patch metadata.
 The verifier never automatically modifies the tracked lock. This evidence covers
 only the package closure; features remain null and memory remains unqualified.
 
@@ -78,8 +84,21 @@ builder contract and exported both OCI images, then failed because classic Docke
 could not load the OCI archives. A bounded converter now preserves the exported
 config bytes and layer DiffIDs in Docker load format; runtime checks must verify
 the loaded config digest and ordered DiffIDs against that exact conversion.
-Actual import and runtime checks remain unverified. Source tests and builder
-feature evidence cannot establish runtime/reference
+Run 42431858481 loaded the exact exports, passed config/DiffID identity and
+native/library checks, and passed full PNG 1×1 probes for JPEG and PNG inputs.
+The WebP probe returned HTTP 400; no image artifacts were retained and comparison
+was skipped. Tests-only commit `00f2d28` failed `TestWebPInputToPNG` in source CI
+42433576835 and pinned-image CI 42433576851: 1×1 and 16×16 native resize and
+1×1 HTTP resize failed, while 550×368 native conversion and 300×300 resize passed.
+Pinned bimg `resizer.go` lines 450–477 shrink WebP on load without dividing the
+residual factor, unlike JPEG. This is a source-supported likely cause; the native
+error was not captured. The user explicitly authorized a narrowly scoped
+correction with matching identities for both instrumented comparison builds.
+That correction changes dependency behavior, not the cache-only memory policy.
+Keep the original small-target probes and source admission unchanged. A patched
+source implementation still needs hosted native verification; it is not evidence
+that either comparison image was built. Earlier export digests differed;
+reproducibility remains unproven. Builder evidence cannot establish runtime/reference
 loader parity or qualify memory.
 
 ## Verification and limits

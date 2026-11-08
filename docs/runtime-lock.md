@@ -24,8 +24,12 @@ for invalid invocation. The reported paths come from the schema, not the input.
 
 Schema 2 fields:
 
-- `source`: fixed upstream commit and bimg version. `libvips`: fixed version,
-  archive URL and SHA-256.
+- `source`: fixed upstream commit and bimg version, plus the authorized
+  `bimg_patch` identity. This object records `module`, `version`, `source_url`,
+  `original_sha256`, `original_size`, `patched_sha256` and `patched_size` for the
+  single replaced source file. Structural validation does not verify those bytes;
+  build preparation must verify the original module and exact staged replacement.
+  `libvips`: fixed version, archive URL and SHA-256.
 - `platform`, `builder_image`, `runtime_image`: target platform and immutable OCI
   references. OCI references have a registry and `@sha256:` digest.
 - `snapshot`: timestamp `date` and `main` and `security` repositories. Each has
@@ -59,13 +63,14 @@ The stored base digest, Go payload and signed snapshot index identities came
 from discovery artifact 13573423316. The InRelease sizes came from official
 snapshot downloads whose hashes match that artifact. Discovery artifact
 13574856370 records the keyring size and hash. Tool identities come from public
-image and release metadata. The buildx and Syft payload bytes have not yet been
-downloaded and checked against their published checksums, and the tools have not
-been executed in the approved CI build environment. These are separate pending
-checks.
+image and release metadata. Hosted image runs verified the buildx and Syft payload
+bytes and executed buildx with the approved builder. End-to-end SBOM completion
+remains unverified because image jobs stopped at the WebP correctness gate.
 The tracked lock records 396 build and 188 runtime packages with 27 and 24
-concrete roots respectively. The reviewed candidate's SHA-256 is
+concrete roots respectively. Before addition of the separately authorized bimg
+patch identity, the reviewed candidate's SHA-256 was
 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+That digest identifies the historical authenticated lock, not later metadata.
 Source CI 42404371864 passed; run 42404371869 authenticated the closure and
 proposal artifact 13586846705 supplied the reviewed bytes. This evidence covers
 only package closure, not features, image reproducibility or memory qualification.

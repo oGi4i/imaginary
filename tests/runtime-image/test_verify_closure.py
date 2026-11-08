@@ -31,9 +31,10 @@ class VerifyClosureTests(unittest.TestCase):
             verify.verify_payloads(rows)
 
     def test_candidate_matches_populated_lock(self):
-        original = {'build_packages': None, 'runtime_packages': None, 'features': None}
+        source = {'bimg_patch': {'identity': 'synthetic'}}
+        original = {'build_packages': None, 'runtime_packages': None, 'features': None, 'source': source}
         populated = {'build_packages': ['a'], 'runtime_packages': ['b'], 'features': None,
-                     'build_roots': ['a'], 'runtime_roots': ['b']}
+                     'source': source, 'build_roots': ['a'], 'runtime_roots': ['b']}
         with mock.patch.object(verify.build.populate_lock, 'populate', return_value=populated):
             self.assertEqual(verify.make_candidate(original, {}), populated)
             self.assertEqual(verify.make_candidate(populated, {}), populated)
@@ -41,6 +42,8 @@ class VerifyClosureTests(unittest.TestCase):
                 verify.make_candidate(dict(populated, build_packages=None), {})
             with self.assertRaises(ValueError):
                 verify.make_candidate(dict(populated, build_roots=['wrong']), {})
+            with self.assertRaises(ValueError):
+                verify.make_candidate(dict(populated, source={'bimg_patch': {'identity': 'changed'}}), {})
 
     def test_publication_is_new_and_exact(self):
         with tempfile.TemporaryDirectory() as tmp:

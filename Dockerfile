@@ -21,14 +21,24 @@ ENV PATH=/usr/local/go/bin:${PATH} CGO_ENABLED=1 GO111MODULE=on GOWORK=off GOPRO
 WORKDIR /src
 COPY inputs/modules /go/pkg/mod
 COPY source/ /src/
+COPY inputs/bimg-patch/ /bimg-patch/
 
 FROM builder AS verification
 RUN --network=none go mod verify && \
-    timeout --signal=KILL 300 go test -timeout=240s ./... && \
-    timeout --signal=KILL 300 go test -race -timeout=240s ./... && \
-    timeout --signal=KILL 120 go vet ./... && \
-    timeout --signal=KILL 120 go build -trimpath -o /imaginary -ldflags='-s -w -h -X main.Version=dev' . && \
+    cd /bimg-patch && sha256sum -c manifest.sha256 && \
+    cd /go/pkg/mod/github.com/h2non/bimg@v1.1.4 && find . -type f | LC_ALL=C sort > /tmp/bimg-original-files && \
+    cd /bimg-patch/module && find . -type f | LC_ALL=C sort > /tmp/bimg-staged-files && \
+    cmp /tmp/bimg-original-files /tmp/bimg-staged-files && \
+    while IFS= read -r file; do if [ "$file" != ./resizer.go ]; then cmp "$file" "/go/pkg/mod/github.com/h2non/bimg@v1.1.4/$file" || exit 1; fi; done < /tmp/bimg-original-files && \
+    cd /src && \
+    timeout --signal=KILL 300 go test -modfile=/bimg-patch/patch.mod -timeout=240s ./... && \
+    timeout --signal=KILL 300 go test -modfile=/bimg-patch/patch.mod -race -timeout=240s ./... && \
+    timeout --signal=KILL 120 go vet -modfile=/bimg-patch/patch.mod ./... && \
+    timeout --signal=KILL 120 go build -modfile=/bimg-patch/patch.mod -trimpath -o /imaginary -ldflags='-s -w -h -X main.Version=dev' . && \
+    cmp go.sum /bimg-patch/patch.sum && \
     mkdir -p /imaginary-build && \
+    cp /bimg-patch/identity.json /imaginary-build/bimg-patch-identity.json && \
+    cp /bimg-patch/manifest.sha256 /imaginary-build/bimg-patch-manifest.sha256 && \
     { vips --version; vips --vips-config; vips -l foreign; } > /imaginary-build/builder-vips.txt && \
     sha256sum /imaginary | awk '{print $1 "  imaginary"}' > /imaginary-build/artifact-sha256.txt && \
     find /usr/local/lib -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >> /imaginary-build/artifact-sha256.txt && \

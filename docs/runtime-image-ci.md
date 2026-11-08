@@ -34,11 +34,32 @@ Docker archive is not published. Run 42429314068 loaded both images and passed
 those identity gates, non-root/library checks and artifact comparisons. It then
 failed when the standalone PNG checker build tried to resolve application modules
 with `GOPROXY=off`. The checker build now uses its single standard-library-only
-source file with module and CGO modes disabled. Codec probes, SBOM completion and
-independent image comparison remain unverified; differing exported digests still
-block a reproducibility claim.
+source file with module and CGO modes disabled.
 
-The remaining description is the proposed path, not evidence of execution. The
+Run 42431858481 loaded the exact exported OCI images and passed config digest and
+ordered DiffID gates, as well as native/library checks. The JPEG and PNG input
+probes passed full PNG decoding and 1×1 dimension checks. The WebP input probe
+returned HTTP 400. No image artifacts were retained and the independent image
+comparison was skipped. Earlier exported digests differed; reproducibility remains
+unproven.
+
+Tests-only commit `00f2d28` recorded the failure in source CI 42433576835 and
+pinned-image CI 42433576851. In both, `TestWebPInputToPNG` failed native resize
+to 1×1 and 16×16 and HTTP resize to 1×1; native conversion to 550×368 and resize
+to 300×300 passed. Both pinned-image matrix builds failed in the Dockerfile's
+native Go regression tests before export; no image artifacts were retained. Pinned
+bimg `resizer.go` lines 450–477 shrink WebP on load without dividing the residual
+factor, unlike JPEG. This supports a likely cause, but the native error was not
+captured and the diagnosis is not confirmed. The user explicitly authorized an
+exact-hash bimg v1.1.4 correction for both the instrumented upstream-source baseline
+and candidate, retaining libvips 8.10.0. The changed processing dependency must be
+identified separately from the unchanged published reference; the memory-policy
+comparison remains cache-only. The correction needs hosted native verification.
+Keep the original 1×1 probe and admission controls unchanged. A shared patch helper
+does not establish that the instrumented baseline image was built.
+
+The remaining description specifies the workflow, not a claim that every step
+completed. The
 lock now contains the reviewed authenticated package
 closures. `features` remains null, and preparation still requires its other
 inputs and checks. Discovery output alone is not approval. The workflow extracts the keyring from the digest-pinned base, resolves

@@ -344,12 +344,22 @@ func validateV2(v interface{}) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	source, err := object(root["source"], "source", "upstream_commit", "bimg_version")
+	source, err := object(root["source"], "source", "upstream_commit", "bimg_version", "bimg_patch")
 	if err != nil {
 		return nil, err
 	}
 	if source["upstream_commit"] != "9357624e976790905f1b1bf4d059f8643c21e6fb" || source["bimg_version"] != "1.1.4" {
 		return nil, fmt.Errorf("source identity does not match baseline")
+	}
+	patch, err := object(source["bimg_patch"], "source.bimg_patch", "module", "version", "source_url", "original_sha256", "original_size", "patched_sha256", "patched_size")
+	if err != nil {
+		return nil, err
+	}
+	if patch["module"] != "github.com/h2non/bimg" || patch["version"] != "v1.1.4" ||
+		patch["source_url"] != "https://raw.githubusercontent.com/h2non/bimg/v1.1.4/resizer.go" ||
+		patch["original_sha256"] != "4897d4105655308bb8235132f057753b718facd1368b11c867ee28d14c16802f" || patch["original_size"] != json.Number("14111") ||
+		patch["patched_sha256"] != "6dd0a8e838850b54500fad5fd48f4fdd1b014b566093523e2a9a02e342ae4bef" || patch["patched_size"] != json.Number("14861") {
+		return nil, fmt.Errorf("source patch identity mismatch")
 	}
 	vips, err := object(root["libvips"], "libvips", "version", "archive_url", "archive_sha256")
 	if err != nil {

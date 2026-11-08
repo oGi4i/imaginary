@@ -1,12 +1,29 @@
 # Candidate image build design
 
-This is a **partially implemented build design**, not a reproducible image. No candidate image has been built or qualified. The runtime-input workflow authenticated package closures that are now recorded in the lock; see [runtime inputs](runtime-inputs.md). The separate [reference inventory](reference-inventory.md) remains incomplete where the published image lacks tools. The BuildKit privilege gate blocks the image experiment. Image publication and deployment remain separate from CI input/build execution. Native execution is not approved locally; the existing Ubuntu source tests do not validate the serving ABI.
+This is a **partially implemented build design**, not a reproducible or qualified
+image. Approved hosted runs built and exported images, but a small-target WebP
+resize failure blocks successful runtime verification and artifact comparison;
+see [runtime image CI](runtime-image-ci.md). The user authorized a hash-bound
+bimg correction, not a weaker probe. The runtime-input workflow authenticated
+package closures recorded in the lock; see [runtime inputs](runtime-inputs.md).
+The separate [reference inventory](reference-inventory.md) remains incomplete
+where the published image lacks tools. The approved BuildKit contract passed in
+actual runs. Image publication and deployment remain separate approvals. Native
+execution is not approved locally; Ubuntu source tests do not validate the
+serving ABI.
 
 ## Reference and fixed inputs
 
 The comparison target is Imaginary 1.2.4, bimg 1.1.4, libvips 8.10.0 and glibc 2.28. The fork is based on upstream Imaginary commit `9357624e976790905f1b1bf4d059f8643c21e6fb`. Its `go.mod` fixes bimg at v1.1.4. The libvips 8.10.0 release archive is recorded in `docs/ci.md` with SHA-256 `1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9`. Verify that hash before extraction; a version tag alone is not a content lock.
 
-The existing Dockerfile uses a Go 1.14 builder and `debian:buster-slim` runtime, downloads the libvips release, and installs native build and runtime packages. Its image tags, package repositories and package versions are mutable. It is not a reproducible recipe. Its package list is a starting point, not proof of the installed reference-image versions, enabled loaders, or complete transitive dependency closure.
+The upstream Dockerfile used a Go 1.14 builder, mutable `debian:buster-slim` tag
+and unpinned package repositories. The maintained [offline recipe](runtime-build.md)
+now uses verified Go 1.20.14, platform-specific base digests and authenticated
+snapshot closures. Those changes do not prove that the published reference used
+the same source, dependencies or loaders. The authorized
+[bimg WebP correction](../patches/bimg-v1.1.4-webp/README.md) is an explicit changed
+processing dependency for both instrumented comparison roles, not an upstream
+version upgrade or proof of reference equivalence.
 
 ## Input lock validation
 
@@ -46,9 +63,9 @@ For reproducibility, also lock the image builder and Dockerfile frontend, target
 
 ## Missing locks and approvals
 
-The lock records the Debian base, Go toolchain, snapshot and package closures; it does not establish a qualified build. Source CI 42404371864 passed, and the authentication step in run 42404371869 succeeded. Reviewed proposal artifact 13586846705 supplied the manually copied lock, SHA-256 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`. The verifier never automatically modifies the tracked lock. This is package-closure evidence only.
+The lock records the Debian base, Go toolchain, snapshot and package closures; it does not establish a qualified build. Source CI 42404371864 passed, and the authentication step in run 42404371869 succeeded. Reviewed proposal artifact 13586846705 supplied the initial lock, historical SHA-256 `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`, before the authorized bimg patch metadata. The verifier never automatically modifies the tracked lock. This is package-closure evidence only.
 
-Reference inventory uses fixed read-only commands in the pinned public image under isolated, non-root execution; it does not start the service. Reference feature and loader evidence remains incomplete. A matching glibc version alone is insufficient to preserve native behavior. Build-time input verification, the BuildKit privilege disposition and image checks remain required. These permissions do not extend to registry publication, local native execution, cluster actions or production changes.
+Reference inventory uses fixed read-only commands in the pinned public image under isolated, non-root execution; it does not start the service. Reference feature and loader evidence remains incomplete. A matching glibc version alone is insufficient to preserve native behavior. Build-time input verification, enforcement of the approved BuildKit contract and successful image checks remain required. These permissions do not extend to registry publication, local native execution, cluster actions or production changes.
 
 ## Provenance and release gate
 

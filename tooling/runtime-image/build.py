@@ -27,13 +27,16 @@ discovery = closure.discovery
 spec = importlib.util.spec_from_file_location('populate_lock', HERE / 'populate_lock.py')
 populate_lock = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(populate_lock)
+spec = importlib.util.spec_from_file_location('bimg_patch', HERE / 'bimg_patch.py')
+bimg_patch = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bimg_patch)
 BASE = 'docker.io/library/debian@sha256:' + discovery.BASE.removeprefix('sha256:')
 BUILDKIT = 'docker.io/moby/buildkit@sha256:8c8514715aab54e12f65b6a38a219084ab926d49c52d519ac17a8e79befb9c75'
 FRONTEND = 'docker.io/docker/dockerfile@sha256:dc9e236567481e0aca4c1f52351af213b9a176622f10e3f4a86e5cc48919fa01'
 BUILDX_SHA256 = 'b13bee81c3db12a4be7d0b9d042b64d0dd9ed116f7674dfac0ffdf2a71acfe3d'
 GO_SHA256 = 'ff445e48af27f93f66bd949ae060d97991c83e11289009d311f25426258f9c44'
 VIPS_SHA256 = '1299d3a98213ae477f0180817ec79afd36803a5b8434f48068e75a721d23b6f9'
-RECIPE_SHA256 = '60301c99211a8774a4933c50c49d91f0b017cc06429b07f57088f1a0e0b26338'
+RECIPE_SHA256 = '1bc9f83cd17906ff46f7205761a21fa0cc80bd20ed455f3c471b9ca3b598c601'
 VIPS_URL = 'https://github.com/libvips/libvips/releases/download/v8.10.0/vips-8.10.0.tar.gz'
 CONFIGURE = ['--disable-debug', '--disable-dependency-tracking', '--disable-introspection',
              '--disable-static', '--enable-gtk-doc-html=no', '--enable-gtk-doc=no', '--enable-pyvips8=no']
@@ -473,6 +476,8 @@ def prepare(lock, evidence, metadata, keyring, output, go, vips, validator, modu
             or config['go_flags'] != ['-trimpath'] or config['module_mode'] != 'readonly'):
         raise ValueError('unexpected build configuration')
     validate_lock_cli(validator, lock['_path'])
+    if lock['source']['bimg_patch'] != bimg_patch.IDENTITY:
+        raise ValueError('lock patch identity mismatch')
     for name in ('go.mod', 'go.sum'):
         if hashlib.sha256((source / name).read_bytes()).hexdigest() != config[name.replace('.', '_') + '_sha256']:
             raise ValueError('module file hash mismatch')
@@ -595,6 +600,16 @@ def main():
         actual_base = measure_base(temp, metadata)
         staged = temp / 'context'
         prepare(lock, evidence, metadata, args.keyring.resolve(strict=True), staged, go_file, vips_file, validator, temp / 'modules', source_copy, actual_base)
+        run_bounded(['/bin/sh', '-c', 'cd "$1" && shift && exec "$@"', 'go', str(source_copy), str(go_exe), 'mod', 'verify'], env=env, timeout=300)
+        original_bimg = temp / 'modules/github.com/h2non/bimg@v1.1.4'
+        copied_bimg = staged / 'inputs/modules/github.com/h2non/bimg@v1.1.4'
+        if bimg_patch.tree(original_bimg) != bimg_patch.tree(copied_bimg):
+            raise ValueError('copied bimg module differs from verified cache')
+        bimg_patch.stage(source_copy, original_bimg,
+                         staged / 'inputs/bimg-patch', '/bimg-patch/module')
+        run_bounded(['/bin/sh', '-c', 'cd "$1" && shift && exec "$@"', 'go', str(source_copy), str(go_exe), 'mod', 'verify'], env=env, timeout=300)
+        validate_modules(source_copy, lock['build'])
+        normalize_times(staged / 'inputs/bimg-patch', lock['build']['source_date_epoch'])
         manifest = context_manifest(staged)
         manifest_bytes = (json.dumps(manifest, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
         if len(manifest_bytes) > 32 * 1024 * 1024:
@@ -603,7 +618,9 @@ def main():
         provenance = {'commit': args.commit, 'tree': args.tree, 'recipe_sha256': hash_file(staged / 'Dockerfile'),
                       'workflow_path': args.workflow, 'workflow_sha256': hash_file(staged / 'source' / workflow),
                       'lock_sha256': lock_digest, 'context_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
-                      'qualification': 'unqualified', 'features': lock['features']}
+                      'qualification': 'unqualified', 'features': lock['features'],
+                      'bimg_patch': lock['source']['bimg_patch'],
+                      'bimg_patch_manifest_sha256': hash_file(staged / 'inputs/bimg-patch/manifest.sha256')}
         (staged / 'provenance.json').write_text(json.dumps(provenance, sort_keys=True) + '\n')
         os.utime(staged / 'context-manifest.json', (lock['build']['source_date_epoch'],) * 2)
         os.utime(staged / 'provenance.json', (lock['build']['source_date_epoch'],) * 2)

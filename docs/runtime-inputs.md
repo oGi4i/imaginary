@@ -60,9 +60,11 @@ reserves cleanup time. Only after cleanup does it publish the exact
 binds source, workflow, run, input and candidate hashes; it is not an external
 signature. Source CI run 42404371864 passed. The authentication step in run
 42404371869 succeeded, and the reviewed proposal artifact 13586846705 supplied
-exact candidate bytes manually copied into the tracked lock. Their SHA-256 is
-`f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
-The verifier never automatically modifies the tracked lock. This evidence covers
+exact candidate bytes manually copied into the tracked lock. Their historical
+SHA-256 is `f6460bba74d4ed53dd002989fbd22ecee978f2da434485b9d7f2134b5977f57c`.
+The separately authorized bimg patch identity changes later lock metadata, not
+those authenticated package rows. A fresh verification must bind the consumed
+lock bytes. The verifier never automatically modifies the tracked lock. This evidence covers
 only the package closure; features remain null and the result is unqualified.
 
 For failed offline APT configuration, CI may retain at most eight sanitized

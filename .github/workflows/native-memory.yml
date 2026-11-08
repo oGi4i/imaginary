@@ -68,47 +68,55 @@ jobs:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
         run: |
+          set -euo pipefail
           go mod download
           go mod verify
+          module="$(go env GOMODCACHE)/github.com/h2non/bimg@v1.1.4"
+          python3 -I -B tooling/runtime-image/bimg_patch.py --go "$(command -v go)" --source "$PWD" --module "$module" --output "$RUNNER_TEMP/bimg-patch" --replace-path "$RUNNER_TEMP/bimg-patch/module"
+          test -z "$(gofmt -l "$RUNNER_TEMP/bimg-patch/module/resizer.go")"
+          cmp go.sum "$RUNNER_TEMP/bimg-patch/patch.sum"
       - name: WebP to PNG native diagnostic
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=KILL 60s go test -v -count=1 -timeout=50s -run '^TestWebPInputToPNG$' ./...
+        run: timeout --signal=KILL 120s go test -modfile="$RUNNER_TEMP/bimg-patch/patch.mod" -v -count=1 -timeout=100s -run '^Test(WebPInputToPNG|SyntheticWebPResize.*|MalformedWebPThenResize)$' ./...
       - name: Body limit boundary test
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=KILL 60s go test -v -count=1 -timeout=50s -run '^TestBodyLimitRawPOSTBoundaries$' ./...
+        run: timeout --signal=KILL 60s go test -modfile="$RUNNER_TEMP/bimg-patch/patch.mod" -v -count=1 -timeout=50s -run '^TestBodyLimitRawPOSTBoundaries$' ./...
       - name: Focused source regressions
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=KILL 60s go test -v -count=1 -timeout=50s -run '^TestRasterSource(PNGHeaderFields|ReadFailuresBypassPlaceholder|OversizeReadBypassesPlaceholder|RejectsWatermarkImageBeforeFetch|InvalidParamsBypassPlaceholder)$' ./...
+        run: timeout --signal=KILL 60s go test -modfile="$RUNNER_TEMP/bimg-patch/patch.mod" -v -count=1 -timeout=50s -run '^TestRasterSource(PNGHeaderFields|ReadFailuresBypassPlaceholder|OversizeReadBypassesPlaceholder|RejectsWatermarkImageBeforeFetch|InvalidParamsBypassPlaceholder)$' ./...
       - name: Unit and integration tests
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=KILL 5m go test -v -count=1 -timeout=4m ./...
+        run: timeout --signal=KILL 5m go test -modfile="$RUNNER_TEMP/bimg-patch/patch.mod" -v -count=1 -timeout=4m ./...
       - name: Race tests
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=KILL 5m go test -v -race -count=1 -timeout=4m ./...
+        run: timeout --signal=KILL 5m go test -modfile="$RUNNER_TEMP/bimg-patch/patch.mod" -v -race -count=1 -timeout=4m ./...
       - name: Vet
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=KILL 120s go vet ./...
+        run: timeout --signal=KILL 120s go vet -modfile="$RUNNER_TEMP/bimg-patch/patch.mod" ./...
       - name: Build binary
         if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
         env:
           CGO_ENABLED: '1'
           GOFLAGS: -mod=readonly
-        run: timeout --signal=KILL 120s go build -o "$RUNNER_TEMP/imaginary" .
+        run: timeout --signal=KILL 120s go build -modfile="$RUNNER_TEMP/bimg-patch/patch.mod" -o "$RUNNER_TEMP/imaginary" .
+      - name: Check temporary module sum
+        if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
+        run: cmp go.sum "$RUNNER_TEMP/bimg-patch/patch.sum"
