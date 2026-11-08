@@ -66,8 +66,10 @@ snapshot downloads whose hashes match that artifact. Discovery artifact
 image and release metadata. Hosted image runs verified the buildx and Syft payload
 bytes and executed buildx with the approved builder. Both jobs in run
 42487208065 completed runtime checks, SBOM creation and artifact upload. Their
-comparison failed on differing provenance, so these results do not establish
-reproducibility.
+comparison failed on differing provenance. Later run 42490597131 at `5fb0679`
+passed exact provenance and OCI comparison after construction fixes. That result
+establishes matching objects for two builds, not reference features, security or
+memory qualification.
 The tracked lock records 396 build and 188 runtime packages with 27 and 24
 concrete roots respectively. Before addition of the separately authorized bimg
 patch identity, the reviewed candidate's SHA-256 was

@@ -1,10 +1,11 @@
 # Candidate image build design
 
-This is a **partially implemented build design**, not a reproducible or qualified
-image. At `0b9b0b0`, both jobs in hosted run 42487208065 built, exported and
-passed native/runtime/codec checks after the authorized hash-bound bimg WebP
-correction. They retained image artifacts, but the comparison failed on differing
-provenance; see [runtime image CI](runtime-image-ci.md). The original 1×1 probe
+This is an **unqualified runtime-image experiment**. Two independent builds at
+`5fb0679` passed native/runtime/codec and read-only font-cache checks, and exact
+provenance/OCI comparison in run 42490597131. Their manifest, config, all eight
+layers and DiffIDs match; see [runtime image CI](runtime-image-ci.md). This
+establishes two-build reproducibility for those inputs, not feature parity,
+production-security approval or memory qualification. The original 1×1 probe
 and admission controls remain unchanged. The runtime-input workflow authenticated
 package closures recorded in the lock; see [runtime inputs](runtime-inputs.md).
 The separate [reference inventory](reference-inventory.md) remains incomplete

@@ -13,8 +13,10 @@ This evidence covers only the package closure, not reference parity, image
 reproducibility or memory qualification. The user approved the exact hosted
 BuildKit daemon and nested RUN contract. After the WebP correction, both image
 jobs in run 42487208065 passed native and runtime checks and retained artifacts;
-the comparison job failed on differing provenance. See
-[runtime image CI](runtime-image-ci.md).
+that comparison failed on differing provenance. Construction fixes at `5fb0679`
+then passed both independent builds and strict provenance/OCI comparison in run
+42490597131, including all eight layers. See [runtime image CI](runtime-image-ci.md)
+for exact identities and remaining qualification limits.
 
 `tooling/runtime-image/build.py` accepts `--lock`, `--closure`, `--discovery`,
 `--keyring`, `--source`, `--output`, `--commit`, `--tree`, `--recipe-sha256`,

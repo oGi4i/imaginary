@@ -88,8 +88,12 @@ so reproducibility remains unproven. Artifact diagnosis found mutable checksum-D
 cache data in the context and generated font UUID/cache, package-log and auxiliary
 ldconfig-cache differences in two runtime layers. Construction fixes retain
 strict comparison and add read-only font-cache validation; see the experiment
-notes for the explicitly approved build-log removal scope.
-These results do not establish runtime/reference feature parity or a memory bound.
+notes for the explicitly approved build-log removal scope. At `5fb0679`, source
+CI 42490596985 passed and runtime run 42490597131 passed both independent builds
+and strict provenance/OCI comparison, including all eight layers. The shared
+manifest is `sha256:ab402cd3ed878cef6e62dffaf5dfefcc87d34a75b0f71f95f7272ddca486a2e4`.
+This is two-build reproducibility evidence, not runtime/reference feature parity,
+a security disposition or a memory bound.
 
 Tests run on a GitHub-hosted runner; they do not qualify a production image or
 prove a memory bound. Do not deploy this branch as an OOM fix. No image

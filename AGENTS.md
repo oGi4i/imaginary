@@ -101,7 +101,13 @@ Keep the original small-target probes and source admission unchanged. At
 `0b9b0b0`, source CI 42487208013 passed all checks. Both image jobs in
 42487208065 passed native/runtime/codec checks and retained artifacts, but the
 comparison failed on differing provenance. No instrumented upstream-source
-baseline image was built. Reproducibility remains unproven. Context construction
+baseline image was built. At `5fb0679`, source CI 42490596985 passed and runtime
+run 42490597131 passed both builds and strict comparison: provenance, OCI manifest,
+config, all eight layers and ordered DiffIDs match. Manifest:
+`sha256:ab402cd3ed878cef6e62dffaf5dfefcc87d34a75b0f71f95f7272ddca486a2e4`.
+This is two-build reproducibility evidence, not reference parity, a security
+disposition or memory qualification. Input authentication in 42490597025 passed;
+overall input status remains deliberately incomplete. Context construction
 omits only mutable checksum-DB cache files after module verification. Runtime
 construction may remove only the four explicitly approved build logs; preserve
 signed package evidence and production logs. Font UUID/cache timestamps must be

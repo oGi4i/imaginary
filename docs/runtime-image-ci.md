@@ -94,6 +94,44 @@ DejaVu Sans lookup as the non-root image user with a read-only filesystem and no
 writable home/cache/temp path. None of these source changes establishes matching
 images until two new independent builds pass.
 
+## Matching independent builds at `5fb0679`
+
+Runtime run [42490597131](https://github.com/oGi4i/imaginary/actions/runs/42490597131)
+completed both independent build jobs and the unchanged strict comparison.
+Provenance bytes and OCI manifest, config, all eight compressed layers and ordered
+DiffIDs match. The shared manifest is
+`sha256:ab402cd3ed878cef6e62dffaf5dfefcc87d34a75b0f71f95f7272ddca486a2e4`;
+the config is
+`sha256:a6b2299d6480ae965d3a52f04f4d62acb2d0eb4aa6a8cbea9e026b60d1aeb5fe`.
+The read-only non-root font-cache probe, native tests and three codec probes
+passed in both builds. SBOMs and identity-bound evidence were retained in
+`runtime-image-one` (13621960729) and `runtime-image-two` (13621449212).
+Read-only inspection of the downloaded artifacts independently confirmed equal
+image objects and matching source/tree/recipe/lock/workflow bindings. Context
+manifest SHA-256 is
+`d26c9ef49ea336415bfaa6a6f6ed47f65f0120d4c29c1a6f30bf2fcb5140b2dc`;
+provenance SHA-256 is
+`bc53870868a1f31a6d951928fbde1d6d41a5067edae5e9147fd4954c3fae295d`.
+All 118 listed source files match the build commit, and 88 staged patch-module
+entries match their recorded manifest. These bindings do not independently
+authenticate every downloaded build input.
+
+The OCI tar files are not byte-identical: `index.json` annotations name replicas
+`one` and `two`; other tar entry payloads match. Artifact ZIPs and SBOMs also
+differ, including SBOM timestamps and namespace IDs. The passing comparison covers
+content-addressed image objects, not byte identity of those evidence containers.
+
+Source CI 42490596985 passed formatting, module and patch verification, focused
+and full tests, race checks, vet and compilation. Input run 42490597025 completed
+authenticated closure collection and replay verification; its overall failure
+remains the deliberate incomplete-evidence gate and partial reference inventory.
+The runtime and input run IDs must not be interchanged.
+
+This establishes matching runtime-image objects for these two builds and locked
+inputs, not runtime/reference loader parity, an instrumented baseline image,
+a production-security disposition, memory qualification or rollout approval.
+`features` remains null. No registry image was published.
+
 The remaining description specifies the workflow, not a claim that every step
 completed. The
 lock now contains the reviewed authenticated package
