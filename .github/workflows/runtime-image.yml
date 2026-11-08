@@ -211,7 +211,7 @@ jobs:
           mkdir "$RUNNER_TEMP/response-go"
           timeout -k 10 120 tar -xzf "$goarchive" -C "$RUNNER_TEMP/response-go"
           export GOROOT="$RUNNER_TEMP/response-go/go" GOWORK=off GOPROXY=off GOSUMDB=off
-          timeout -k 10 120 "$GOROOT/bin/go" build -o "$RUNNER_TEMP/runtime-response-check" ./cmd/runtime-response-check
+          GO111MODULE=off CGO_ENABLED=0 timeout -k 10 120 "$GOROOT/bin/go" build -trimpath -o "$RUNNER_TEMP/runtime-response-check" ./cmd/runtime-response-check/main.go
           for kind in jpeg png webp; do
             case "$kind" in jpeg) file=testdata/imaginary.jpg;; png) file=testdata/test.png;; webp) file=testdata/test.webp;; esac
             for attempt in 1 2 3 4 5; do

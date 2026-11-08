@@ -30,7 +30,13 @@ gzip layers, and verifies the ordered uncompressed DiffIDs. It does not extract
 layer files or execute archive contents. After load, Docker's image config digest
 and ordered layer DiffIDs must match the conversion identity before any runtime
 probe. The original OCI archive remains the artifact and SBOM input; the temporary
-Docker archive is not published. Actual import/runtime success remains pending.
+Docker archive is not published. Run 42429314068 loaded both images and passed
+those identity gates, non-root/library checks and artifact comparisons. It then
+failed when the standalone PNG checker build tried to resolve application modules
+with `GOPROXY=off`. The checker build now uses its single standard-library-only
+source file with module and CGO modes disabled. Codec probes, SBOM completion and
+independent image comparison remain unverified; differing exported digests still
+block a reproducibility claim.
 
 The remaining description is the proposed path, not evidence of execution. The
 lock now contains the reviewed authenticated package

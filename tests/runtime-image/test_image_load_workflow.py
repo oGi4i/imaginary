@@ -22,6 +22,14 @@ class ImageLoadWorkflowTests(unittest.TestCase):
         self.assertNotIn('docker load -i "$RUNNER_TEMP/evidence/artifact/image.oci.tar"', workflow)
         self.assertIn('oci-load-identity.json', workflow)
 
+    def test_response_checker_build_is_standard_library_only(self):
+        workflow = (ROOT / '.github/workflows/runtime-image.yml').read_text()
+        self.assertIn('GO111MODULE=off CGO_ENABLED=0', workflow)
+        self.assertIn('"$GOROOT/bin/go" build -trimpath -o "$RUNNER_TEMP/runtime-response-check" ./cmd/runtime-response-check/main.go', workflow)
+        self.assertNotIn('"$GOROOT/bin/go" build -o "$RUNNER_TEMP/runtime-response-check" ./cmd/runtime-response-check\n', workflow)
+        source = (ROOT / 'cmd/runtime-response-check/main.go').read_text()
+        self.assertNotIn('github.com/', source)
+
 
 if __name__ == '__main__':
     unittest.main()
