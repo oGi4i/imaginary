@@ -219,6 +219,11 @@ jobs:
               test "$attempt" != 5
               sleep 2
             done
+          case "$status" in
+            200) ;;
+            [1-5][0-9][0-9]) printf 'codec probe failed input=%s http_status=%s\n' "$kind" "$status" >&2; exit 1 ;;
+            *) printf 'codec probe failed input=%s reason=invalid_status\n' "$kind" >&2; exit 1 ;;
+          esac
             timeout -k 10 30 "$RUNNER_TEMP/runtime-response-check" "$status" "$kind" "$RUNNER_TEMP/evidence/response" >> "$RUNNER_TEMP/evidence/artifact/codecs.jsonl"
           done
           printf '%s\n' '{"runtime_loader_enumeration":"unavailable","feature_parity":"unqualified","codec_checks":"codecs.jsonl"}' > "$RUNNER_TEMP/evidence/artifact/features.json"
