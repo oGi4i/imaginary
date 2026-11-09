@@ -19,7 +19,10 @@ symbols and all call sites, plan cross-file work, add a failing regression test,
 implement the smallest change, run checks, and obtain an independent review.
 Keep active image work serialized through native processing and cleanup.
 A cancelled client must not release capacity while native code still runs.
-Health and version requests must not wait behind image work.
+Health and version requests must not wait behind image work. URL-signature
+rejections remain before admission and return fixed JSON without placeholders;
+public-route authentication/method errors are also placeholder-free. Invalid
+requests must never start native work outside the image gate.
 `ImageMiddleware` owns the shared gate: one active request, at most one waiter,
 and a 30-second queue timeout. Multipart cleanup runs before promotion.
 Source admission accepts single-frame JPEG, PNG and WebP with a provisional
@@ -64,8 +67,13 @@ Reference probes and serving workloads do not inherit those build capabilities.
 The unchanged reference inventory also uses fixed read-only native-file hash and
 symlink probes under `/usr/local/lib`, with strict bounded output parsing. Missing
 utilities remain unavailable; never install tools, mount a probe or start the
-reference service to fill a gap without separate approval. Native-file identities
-improve evidence but do not establish registered-loader or configuration parity.
+reference service to fill a gap without separate approval. The user separately
+authorized the source-owned loader probe against the exact published image and
+verified candidate on disposable hosted runners, with only the same hash-bound
+executable mounted read-only. Keep non-root/read-only/network-none/cap-drop/NNP
+and finite probe/cleanup bounds. This exception does not permit other mounts,
+reference modification, service startup or local native execution. Native-file
+identities and registered types do not establish full configuration parity.
 Run 42493897646 at `4467683` collected six native files and four symlinks. Four
 support-file hashes and all symlink targets match candidate `5fb0679`; the two
 libvips shared-library binaries differ. CLI/ELF/loader probes remain unavailable.

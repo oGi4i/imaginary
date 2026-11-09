@@ -33,6 +33,8 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
       - name: Test offline helpers
+        env:
+          LOADER_PROBE_STUB_TESTS: '1'
         run: python3 -I -B -m unittest discover -s tests/runtime-image -v
       - name: Discover verified inputs and package closures
         shell: bash
@@ -202,6 +204,17 @@ jobs:
           timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/bimg-patch-manifest.sha256" "$RUNNER_TEMP/evidence/artifact/bimg-patch-manifest.sha256"
           cmp "$RUNNER_TEMP/runtime-context/inputs/bimg-patch/identity.json" "$RUNNER_TEMP/evidence/artifact/bimg-patch-identity.json"
           cmp "$RUNNER_TEMP/runtime-context/inputs/bimg-patch/manifest.sha256" "$RUNNER_TEMP/evidence/artifact/bimg-patch-manifest.sha256"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/loader-probe" "$RUNNER_TEMP/evidence/artifact/loader-probe"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/loader-probe.sha256" "$RUNNER_TEMP/evidence/artifact/loader-probe.sha256"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/loader-probe-source.sha256" "$RUNNER_TEMP/evidence/artifact/loader-probe-source.sha256"
+          timeout -k 10 30 docker cp "$verification:/usr/local/share/imaginary-build/loader-probe-ldd.txt" "$RUNNER_TEMP/evidence/artifact/loader-probe-ldd.txt"
+          test "$(sha256sum "$RUNNER_TEMP/evidence/artifact/loader-probe" | cut -d' ' -f1)" = "$(cat "$RUNNER_TEMP/evidence/artifact/loader-probe.sha256")"
+          test "$(sha256sum "$RUNNER_TEMP/runtime-context/source/tooling/runtime-image/loader_probe.c" | cut -d' ' -f1)" = "$(cat "$RUNNER_TEMP/evidence/artifact/loader-probe-source.sha256")"
+          chmod 755 "$RUNNER_TEMP/evidence/artifact/loader-probe"
+          loader_status=0
+          python3 -I -B tooling/runtime-image/loader_inventory.py --expected "$RUNNER_TEMP/evidence/artifact/oci-load-identity.json" --inspect "$RUNNER_TEMP/loaded-image.json" --binary "$RUNNER_TEMP/evidence/artifact/loader-probe" --source "$RUNNER_TEMP/runtime-context/source/tooling/runtime-image/loader_probe.c" --output "$RUNNER_TEMP/evidence/artifact/loader-inventory.json" || loader_status=$?
+          test "$loader_status" = 0 || test "$loader_status" = 2
+          printf '%s\n' "$loader_status" > "$RUNNER_TEMP/loader-status"
           timeout -k 10 120 docker run --name "$inventory" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'dpkg-query -W; getconf GNU_LIBC_VERSION; ldd /usr/local/bin/imaginary; ldd /usr/local/lib/libvips.so.42' > "$RUNNER_TEMP/evidence/artifact/runtime-inventory.txt"
           timeout -k 10 120 docker run --name "$artifact_checks" --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/sh "$tag" -ec 'sha256sum /usr/local/bin/imaginary | awk '\''{print $1 "  imaginary"}'\''; find /usr/local/lib -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum' > "$RUNNER_TEMP/evidence/artifact/runtime-artifacts.sha256"
           cmp "$RUNNER_TEMP/evidence/artifact/builder-artifacts.sha256" "$RUNNER_TEMP/evidence/artifact/runtime-artifacts.sha256"
@@ -233,18 +246,21 @@ jobs:
           esac
             timeout -k 10 30 "$RUNNER_TEMP/runtime-response-check" "$status" "$kind" "$RUNNER_TEMP/evidence/response" >> "$RUNNER_TEMP/evidence/artifact/codecs.jsonl"
           done
-          printf '%s\n' '{"runtime_loader_enumeration":"unavailable","feature_parity":"unqualified","codec_checks":"codecs.jsonl"}' > "$RUNNER_TEMP/evidence/artifact/features.json"
+          printf '%s\n' '{"runtime_loader_enumeration":"loader-inventory.json","feature_parity":"unqualified","codec_checks":"codecs.jsonl"}' > "$RUNNER_TEMP/evidence/artifact/features.json"
           timeout -k 10 600 "$RUNNER_TEMP/tools/syft" "oci-archive:$RUNNER_TEMP/evidence/artifact/image.oci.tar" -o spdx-json > "$RUNNER_TEMP/evidence/artifact/sbom.spdx.json"
           cp "$RUNNER_TEMP/runtime-context/provenance.json" "$RUNNER_TEMP/evidence/artifact/provenance.json"
           cp "$RUNNER_TEMP/runtime-context/context-manifest.json" "$RUNNER_TEMP/evidence/artifact/context-manifest.json"
           sha256sum "$RUNNER_TEMP/evidence/artifact/image.oci.tar" "$RUNNER_TEMP/evidence/artifact/sbom.spdx.json" > "$RUNNER_TEMP/evidence/artifact/payload-sha256.txt"
           stat -c '%s %n' "$RUNNER_TEMP/evidence/artifact/image.oci.tar" "$RUNNER_TEMP/evidence/artifact/sbom.spdx.json" > "$RUNNER_TEMP/evidence/artifact/payload-size.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
         with:
           name: runtime-image-${{ matrix.replica }}
           path: ${{ runner.temp }}/evidence/artifact/
           if-no-files-found: error
           retention-days: 7
+      - name: Enforce loader comparison
+        run: test "$(cat "$RUNNER_TEMP/loader-status")" = 0
   compare:
     needs: build
     runs-on: ubuntu-24.04
@@ -266,4 +282,5 @@ jobs:
         run: |
           set -euo pipefail
           cmp "$RUNNER_TEMP/one/provenance.json" "$RUNNER_TEMP/two/provenance.json"
+          cmp "$RUNNER_TEMP/one/loader-inventory.json" "$RUNNER_TEMP/two/loader-inventory.json"
           timeout -k 10 600 python3 -I -B tooling/runtime-image/verify_image.py "$RUNNER_TEMP/one/image.oci.tar" "$RUNNER_TEMP/two/image.oci.tar"

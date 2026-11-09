@@ -38,6 +38,13 @@ RUN --network=none go mod verify && \
     timeout --signal=KILL 120 go build -modfile=/bimg-patch/patch.mod -trimpath -o /imaginary -ldflags='-s -w -h -X main.Version=dev' . && \
     cmp go.sum /bimg-patch/patch.sum && \
     mkdir -p /imaginary-build && \
+    cc -O2 -Wall -Wextra -Werror tooling/runtime-image/loader_probe.c $(pkg-config --cflags --libs vips) -o /imaginary-build/loader-probe && \
+    sha256sum tooling/runtime-image/loader_probe.c | awk '{print $1}' > /imaginary-build/loader-probe-source.sha256 && \
+    sha256sum /imaginary-build/loader-probe | awk '{print $1}' > /imaginary-build/loader-probe.sha256 && \
+    ldd /imaginary-build/loader-probe > /tmp/loader-probe-ldd.txt && \
+    ! grep -q 'not found' /tmp/loader-probe-ldd.txt && \
+    sed -E 's/ \(0x[0-9a-f]+\)//g' /tmp/loader-probe-ldd.txt > /imaginary-build/loader-probe-ldd.txt && \
+    rm /tmp/loader-probe-ldd.txt && \
     cp /bimg-patch/identity.json /imaginary-build/bimg-patch-identity.json && \
     cp /bimg-patch/manifest.sha256 /imaginary-build/bimg-patch-manifest.sha256 && \
     { vips --version; vips --vips-config; vips -l foreign; } > /imaginary-build/builder-vips.txt && \

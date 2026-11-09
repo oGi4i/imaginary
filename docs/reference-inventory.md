@@ -38,6 +38,33 @@ loader parity, publisher build provenance, production suitability or a memory
 bound. Do not run the helper locally; no image publication or deployment is part
 of this job.
 
+## Separately authorized registered-type probe
+
+The user explicitly authorized executing the pinned published image's libvips and
+the verified candidate's libvips through the same source-owned, hash-bound probe
+on disposable GitHub-hosted runners. This is separate from the stock inventory
+job above. One probe executable is compiled in the locked Buster builder, retained
+with source/binary hashes and linked-library evidence, then copied from the
+identity-checked candidate export. Both probe containers receive that identical
+file as their only read-only mount. The reference image is not modified, no tools
+are installed there and Imaginary does not start.
+
+Probe containers use UID/GID 65534, no network, read-only root, dropped capabilities,
+no-new-privileges, one CPU, 512 MiB memory, 128 PIDs, a 45-second command deadline
+and 1 MiB output bound. The environment excludes loader overrides and has no
+writable home/cache/temp location. Named containers are identity-checked and
+removed even after a failure. Local native execution remains unauthorized.
+
+The C probe initializes libvips for the normal application prefix and recursively
+enumerates concrete registered foreign loader and saver classes. A bounded
+protocol carries the actual runtime version and sorted unique class names;
+warnings, invalid output, identity changes and cleanup errors fail closed. The
+comparison report binds image and probe identities and records exact set
+differences. A matching registered-type set does not prove every codec behavior,
+full build-configuration parity, publisher provenance or production suitability.
+`features` stays null until the complete required evidence is resolved. Probe
+source and integration do not establish a successful hosted run.
+
 ## Hosted native-file result at `4467683`
 
 Input run 42493897646 collected and uploaded reference artifact 13622692245.

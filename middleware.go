@@ -166,7 +166,14 @@ func isPublicPath(path string) bool {
 	return path == "/" || path == "/health" || path == "/form"
 }
 
+func withoutPlaceholder(o ServerOptions) ServerOptions {
+	o.EnablePlaceholder = false
+	o.Placeholder = ""
+	return o
+}
+
 func validateURLSignature(next http.Handler, o ServerOptions) http.Handler {
+	errorOptions := withoutPlaceholder(o)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Retrieve and remove URL signature from request parameters
 		query := r.URL.Query()
@@ -181,12 +188,12 @@ func validateURLSignature(next http.Handler, o ServerOptions) http.Handler {
 
 		urlSign, err := base64.RawURLEncoding.DecodeString(sign)
 		if err != nil {
-			ErrorReply(r, w, ErrInvalidURLSignature, o)
+			ErrorReply(r, w, ErrInvalidURLSignature, errorOptions)
 			return
 		}
 
 		if !hmac.Equal(urlSign, expectedSign) {
-			ErrorReply(r, w, ErrURLSignatureMismatch, o)
+			ErrorReply(r, w, ErrURLSignatureMismatch, errorOptions)
 			return
 		}
 

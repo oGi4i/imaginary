@@ -31,7 +31,10 @@ It does not add allocator trimming. One shared gate allows
 one active image request and at most one waiter, with a 30-second queue limit.
 Overload and queue expiry return JSON 503 with `Retry-After: 1`; health and
 version routes bypass the gate. Native processing retains the slot until the
-handler and multipart cleanup finish, even if its client disconnects.
+handler and multipart cleanup finish, even if its client disconnects. Invalid URL
+signatures and public-route authentication/method errors return JSON even when
+placeholders are enabled; they do not run native placeholder resizing outside
+the image gate.
 
 Source admission accepts only single-frame JPEG, PNG and WebP. The default
 16,000,000 source-pixel limit is provisional and not qualified. Image watermarks
@@ -70,7 +73,11 @@ symlink inventory improves file-identity evidence, not registered-loader parity;
 missing tools do not trigger installation or service startup. Run 42493897646
 collected six native files and four symlinks: support files and link targets match
 candidate `5fb0679`, but the two libvips shared-library binaries differ. Loader
-parity and publisher provenance remain unresolved. Source CI 42493897663 and
+parity and publisher provenance remain unresolved. The user separately authorized
+a source-owned registered-loader/saver probe against both images, using the same
+hash-bound read-only executable mount in isolated hosted containers. Its source
+is not evidence of a completed comparison; see the inventory documentation.
+Source CI 42493897663 and
 runtime run 42493897661 pass at `4467683`, with the same OCI manifest/config/layers
 as `5fb0679`. Dependency edges record every distinct
 installed satisfying provider, not an APT provider choice.

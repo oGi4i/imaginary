@@ -158,8 +158,22 @@ exported runtime and compares the hashes and symlinks against runtime files.
 For JPEG, PNG and WebP inputs, it checks HTTP status and independently decodes
 the complete PNG output with the verified Go toolchain. It checks 1×1 output
 dimensions before recording success. The runtime image has no `vips` CLI; builder
-loader output does not prove runtime loader equivalence. `features.json` marks runtime loader enumeration unavailable
-and feature parity unqualified. Missing reference-feature evidence and independent
+loader output does not prove runtime loader equivalence. The separately authorized
+source-owned loader probe is compiled once in the locked verification stage and
+retained with source/binary hashes and linked-library evidence. After exact OCI
+load checks, the workflow mounts that same executable read-only into isolated
+candidate and unchanged-reference containers to enumerate concrete registered
+loader/saver classes. This does not start Imaginary in the reference or install
+reference tools. See [reference inventory](reference-inventory.md) for the exact
+isolation and evidence limits.
+
+A valid mismatch is retained as bounded `loader-inventory.json` evidence before
+the loader-comparison gate fails; malformed output or supervision/identity/cleanup
+errors fail immediately. Both independent jobs must also agree on the deterministic
+loader report. `features.json` links the actual registered-type result while full
+feature parity remains unqualified. Probe integration changes the runtime evidence
+files and image identity, so the earlier `5fb0679` manifest is historical, not a
+pin for an unbuilt probe image. Hosted probe results remain pending. Missing reference-feature evidence and independent
 build-time closure verification remain acceptance blockers. Matching image object digests
 are not an independent security disposition or evidence of deployment fitness.
 Run only offline mocked Python tests locally; do not run native builds locally.

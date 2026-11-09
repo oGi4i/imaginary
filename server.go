@@ -146,9 +146,10 @@ func join(o ServerOptions, route string) string {
 func NewServerMux(o ServerOptions) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle(join(o, "/"), Middleware(indexController, o))
-	mux.Handle(join(o, "/form"), Middleware(formController, o))
-	mux.Handle(join(o, "/health"), Middleware(healthController, o))
+	publicOptions := withoutPlaceholder(o)
+	mux.Handle(join(o, "/"), Middleware(indexController, publicOptions))
+	mux.Handle(join(o, "/form"), Middleware(formController, publicOptions))
+	mux.Handle(join(o, "/health"), Middleware(healthController, publicOptions))
 
 	image := ImageMiddleware(o)
 	mux.Handle(join(o, "/resize"), image(Resize))
