@@ -18,6 +18,17 @@ class ProtocolTests(unittest.TestCase):
         value = loader.parse_protocol(b'VIPS_PROBE 1\nVERSION 8.10.0\nLOAD VipsForeignLoadA\nSAVE VipsForeignSaveB\nEND\n')
         self.assertEqual(value, {'version': '8.10.0', 'loaders': ['VipsForeignLoadA'], 'savers': ['VipsForeignSaveB']})
 
+    def test_saver_matrix_print_subclass(self):
+        value = loader.parse_protocol(b'VIPS_PROBE 1\nVERSION 8.10.0\nLOAD VipsForeignLoadA\n'
+                                      b'SAVE VipsForeignPrintMatrix\nSAVE VipsForeignSaveB\nEND\n')
+        self.assertEqual(value['savers'], ['VipsForeignPrintMatrix', 'VipsForeignSaveB'])
+        for lines in (b'LOAD VipsForeignPrintMatrix\nSAVE VipsForeignSaveB\n',
+                      b'LOAD VipsForeignLoadA\nSAVE VipsForeignPrintMatrixExtra\n',
+                      b'LOAD VipsForeignLoadA\nSAVE VipsForeignPrintMatrix\nSAVE VipsForeignPrintMatrix\n',
+                      b'LOAD VipsForeignLoadA\nSAVE VipsForeignSaveB\nSAVE VipsForeignPrintMatrix\n'):
+            with self.subTest(lines=lines), self.assertRaises(ValueError):
+                loader.parse_protocol(b'VIPS_PROBE 1\nVERSION 8.10.0\n' + lines + b'END\n')
+
     def test_invalid(self):
         for data in (b'', b'VIPS_PROBE 1\nVERSION 10000.1.1\nEND\n', b'VIPS_PROBE 1\nVERSION 8.10.0\nEND',
                      b'VIPS_PROBE 1\nVERSION 8.10.0\nLOAD VipsForeignSaveA\nEND\n',

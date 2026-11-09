@@ -65,9 +65,11 @@ collect_class(VipsObjectClass *cls, void *data)
         }
         length++;
     }
-    if (length > MAX_NAME || length <= prefix_length ||
-        strncmp(name, classes->prefix, prefix_length) != 0 ||
-        classes->count == MAX_CLASSES) {
+    /* libvips 8.10 defines VipsForeignPrintMatrix under VipsForeignSaveMatrix. */
+    if (length > MAX_NAME || classes->count == MAX_CLASSES ||
+        ((length <= prefix_length ||
+          strncmp(name, classes->prefix, prefix_length) != 0) &&
+         !(classes == &saves && strcmp(name, "VipsForeignPrintMatrix") == 0))) {
         classes->failed = 1;
         return classes;
     }

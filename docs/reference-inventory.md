@@ -57,9 +57,11 @@ removed even after a failure. Local native execution remains unauthorized.
 
 The C probe initializes libvips for the normal application prefix and recursively
 enumerates concrete registered foreign loader and saver classes. A bounded
-protocol carries the actual runtime version and sorted unique class names;
-warnings, invalid output, identity changes and cleanup errors fail closed. The
-comparison report binds image and probe identities and records exact set
+protocol carries the actual runtime version and sorted unique class names.
+libvips 8.10.0 defines `VipsForeignPrintMatrix` beneath `VipsForeignSaveMatrix`,
+so this exact name is accepted only as a saver despite its different prefix.
+Other prefix violations still fail. Warnings, invalid output, identity changes
+and cleanup errors fail closed. The comparison report binds image and probe identities and records exact set
 differences. A matching registered-type set does not prove every codec behavior,
 full build-configuration parity, publisher provenance or production suitability.
 `features` stays null until the complete required evidence is resolved. Probe

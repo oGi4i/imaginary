@@ -81,6 +81,9 @@ void *vips_class_map_all(GType type, VipsClassMapFn fn, void *data) {
     if (is("invalid")) { c.name = "VipsForeignLoadBad\nline"; fn(&c, data); return NULL; }
     if (is("punctuation")) { c.name = "VipsForeignLoadBad!"; fn(&c, data); return NULL; }
     if (is("wrong-prefix")) { c.name = "OtherClass"; fn(&c, data); return NULL; }
+    if (is("matrix-print") && type == VIPS_TYPE_FOREIGN_SAVE) { c.name = "VipsForeignPrintMatrix"; fn(&c, data); return NULL; }
+    if (is("matrix-print-load") && type == VIPS_TYPE_FOREIGN_LOAD) { c.name = "VipsForeignPrintMatrix"; fn(&c, data); return NULL; }
+    if (is("matrix-print-extra") && type == VIPS_TYPE_FOREIGN_SAVE) { c.name = "VipsForeignPrintMatrixExtra"; fn(&c, data); return NULL; }
     snprintf(name, sizeof name, "%sZ", prefix); c.name = name; fn(&c, data);
     snprintf(name, sizeof name, "%sA", prefix); c.name = name; fn(&c, data);
     if (is("duplicate")) fn(&c, data);
@@ -131,6 +134,17 @@ class LoaderProbeTests(unittest.TestCase):
         self.assertEqual(result.stdout, b"VIPS_PROBE 1\nVERSION 8.10.0\nLOAD VipsForeignLoadA\n"
                          b"LOAD VipsForeignLoadZ\nSAVE VipsForeignSaveA\nSAVE VipsForeignSaveZ\nEND\n")
         self.assertEqual(result.stderr, b"")
+
+    def test_matrix_print_is_a_saver_subclass(self):
+        result = self.run_probe('matrix-print')
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(b'SAVE VipsForeignPrintMatrix\n', result.stdout)
+        self.assertEqual(result.stderr, b'')
+        for scenario in ('matrix-print-load', 'matrix-print-extra'):
+            with self.subTest(scenario=scenario):
+                result = self.run_probe(scenario)
+                self.assertEqual(result.returncode, 44)
+                self.assertEqual((result.stdout, result.stderr), (b'', b''))
 
     def test_runtime_version_is_reported(self):
         result = self.run_probe("version")

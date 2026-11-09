@@ -71,11 +71,12 @@ def parse_protocol(data):
         result = {'version': version.group(1), 'loaders': [], 'savers': []}
         saving = False
         for line in lines[2:-1]:
-            match = re.fullmatch(r'(LOAD|SAVE) (VipsForeign(?:Load|Save)[A-Za-z0-9_]+)', line)
+            match = re.fullmatch(r'(LOAD|SAVE) (VipsForeign(?:(?:Load|Save)[A-Za-z0-9_]+|PrintMatrix))', line)
             if not match:
                 raise ValueError()
             kind, name = match.groups()
-            if len(name) > 128 or not name.startswith('VipsForeign' + ('Load' if kind == 'LOAD' else 'Save')):
+            if len(name) > 128 or not (name.startswith('VipsForeign' + ('Load' if kind == 'LOAD' else 'Save')) or
+                                       (kind == 'SAVE' and name == 'VipsForeignPrintMatrix')):
                 raise ValueError()
             if kind == 'SAVE':
                 saving = True
