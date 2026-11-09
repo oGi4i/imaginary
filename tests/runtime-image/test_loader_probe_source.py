@@ -95,7 +95,10 @@ class LoaderProbeSourceTests(unittest.TestCase):
     def test_source_uses_runtime_version_and_class_map(self):
         source = SOURCE.read_text()
         for text in ("vips_version(0)", "vips_version(1)", "vips_version(2)",
-                     "VIPS_TYPE_FOREIGN_LOAD", "VIPS_TYPE_FOREIGN_SAVE"):
+                     "VIPS_TYPE_FOREIGN_LOAD", "VIPS_TYPE_FOREIGN_SAVE",
+                     "EXIT_SETUP = 41", "EXIT_INIT = 42", "EXIT_VERSION = 43",
+                     "EXIT_CLASSES = 44", "EXIT_LIBRARY = 45", "EXIT_STDERR = 46",
+                     "EXIT_PROTOCOL = 47", "EXIT_OUTPUT = 48"):
             self.assertIn(text, source)
 
 
@@ -154,17 +157,21 @@ class LoaderProbeTests(unittest.TestCase):
         self.assertEqual(result.stdout, b"VIPS_PROBE 1\nVERSION 8.10.0\nEND\n")
 
     def test_failures_emit_no_private_output(self):
-        for scenario in ("init-warning", "stderr-warning", "stderr-flood", "init-fail", "version-negative", "version-overflow", "map-warning", "shutdown-warning",
-                         "error-buffer", "overflow", "long", "invalid", "punctuation", "wrong-prefix", "duplicate"):
+        cases = {"init-fail": 42, "version-negative": 43, "version-overflow": 43,
+                 "overflow": 44, "long": 44, "invalid": 44, "punctuation": 44,
+                 "wrong-prefix": 44, "init-warning": 45, "map-warning": 45,
+                 "shutdown-warning": 45, "error-buffer": 45, "stderr-warning": 46,
+                 "stderr-flood": 46, "duplicate": 47}
+        for scenario, code in cases.items():
             with self.subTest(scenario=scenario):
                 result = self.run_probe(scenario)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.returncode, code)
                 self.assertEqual(result.stdout, b"")
                 self.assertEqual(result.stderr, b"")
 
     def test_arguments_are_rejected(self):
         result = self.run_probe("", "unexpected")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 41)
         self.assertEqual((result.stdout, result.stderr), (b"", b""))
 
 

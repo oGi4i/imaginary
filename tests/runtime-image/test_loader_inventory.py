@@ -171,6 +171,32 @@ class ProtocolTests(unittest.TestCase):
                     loader.probe(run, 'image', pathlib.Path('/tmp/probe'))
         self.assertEqual(str(caught.exception), 'cleanup: invalid-data')
 
+    def test_probe_only_maps_allowlisted_exit_codes(self):
+        cases = {41: 'probe-setup', 42: 'probe-init', 43: 'probe-version',
+                 44: 'probe-classes', 45: 'probe-library', 46: 'probe-stderr',
+                 47: 'probe-protocol', 48: 'probe-output',
+                 1: 'command-exit', 40: 'command-exit', 49: 'command-exit',
+                 125: 'command-exit', 126: 'command-exit', 127: 'command-exit',
+                 137: 'command-exit', -1: 'command-exit'}
+        for code, reason in cases.items():
+            def run(argv, **kwargs):
+                if argv[1] == 'run':
+                    raise loader.reference.ProbeExit(code)
+                return b''
+            with self.subTest(code=code):
+                with self.assertRaises(loader.DiagnosticError) as caught:
+                    with loader.stage('candidate-probe'):
+                        loader.probe(run, 'image', pathlib.Path('/tmp/probe'))
+                self.assertEqual(str(caught.exception), 'candidate-probe: ' + reason)
+
+    def test_allowlisted_code_outside_probe_run_stays_generic(self):
+        def run(argv, **kwargs):
+            raise loader.reference.ProbeExit(41)
+        with self.assertRaises(loader.DiagnosticError) as caught:
+            with loader.stage('candidate-probe'):
+                loader.probe(run, 'image', pathlib.Path('/tmp/probe'))
+        self.assertEqual(str(caught.exception), 'candidate-probe: command-exit')
+
     def test_count_limit(self):
         lines = b''.join(('LOAD VipsForeignLoad%04d\n' % i).encode() for i in range(1025))
         with self.assertRaises(ValueError):

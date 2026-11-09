@@ -25,6 +25,13 @@ reference = sibling('reference_inventory')
 image_load = sibling('image_load')
 LIMIT = reference.LIMIT
 PROBE = '/usr/local/share/imaginary-build/loader-probe'
+PROBE_EXIT_REASONS = {41: 'probe-setup', 42: 'probe-init', 43: 'probe-version',
+                      44: 'probe-classes', 45: 'probe-library', 46: 'probe-stderr',
+                      47: 'probe-protocol', 48: 'probe-output'}
+
+
+class ProbeStageExit(reference.ProbeExit):
+    pass
 
 
 class DiagnosticError(ValueError):
@@ -37,6 +44,8 @@ def stage(name):
         yield
     except DiagnosticError:
         raise
+    except ProbeStageExit as exc:
+        raise DiagnosticError(name + ': ' + PROBE_EXIT_REASONS[exc.code]) from None
     except reference.ProbeExit:
         raise DiagnosticError(name + ': command-exit') from None
     except reference.InventoryError:
@@ -134,7 +143,13 @@ def probe(run, image, path):
     if run(['docker', 'ps', '-a', '--filter', 'name=^/' + name + '$', '--format', '{{.Names}}'], timeout=30).strip():
         raise ValueError('container name already exists')
     try:
-        return parse_protocol(run(argv, timeout=45, limit=LIMIT))
+        try:
+            data = run(argv, timeout=45, limit=LIMIT)
+        except reference.ProbeExit as exc:
+            if exc.code in PROBE_EXIT_REASONS:
+                raise ProbeStageExit(exc.code) from None
+            raise
+        return parse_protocol(data)
     finally:
         with stage('cleanup'):
             cleanup(run, name, label)
