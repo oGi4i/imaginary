@@ -338,24 +338,58 @@ func TestQualificationLifecycleURLSignatureRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := qualificationTimings.snapshot().LatestCompletionSequence
 	o := ServerOptions{QualSnapshot: true, EnableURLSignature: true, URLSignatureKey: "secret", EnablePlaceholder: true, PlaceholderImage: placeholder, PlaceholderStatus: http.StatusOK}
 	h := ImageMiddleware(o)(func([]byte, ImageOptions) (Image, error) {
 		t.Fatal("invalid signature reached operation")
 		return Image{}, nil
 	})
+	for _, tc := range []struct {
+		name string
+		path string
+		want Error
+	}{
+		{"mismatch", "/resize?width=64&height=64&sign=invalid", ErrURLSignatureMismatch},
+		{"malformed", "/resize?width=64&height=64&sign=%25", ErrInvalidURLSignature},
+		{"missing", "/resize?width=64&height=64", ErrURLSignatureMismatch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := qualificationTimings.snapshot().LatestCompletionSequence
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, tc.path, nil))
+			got := qualificationTimings.snapshot()
+			checkFixedError(t, w, tc.want)
+			if got.LatestCompletionSequence != before+1 || len(got.Records) == 0 {
+				t.Fatalf("missing signature rejection record: snapshot=%+v", got)
+			}
+			record := got.Records[len(got.Records)-1]
+			if w.Header().Get("X-Imaginary-Request-Sequence") != strconv.FormatUint(record.RequestSequence, 10) {
+				t.Fatal("signature rejection sequence does not match its lifecycle record")
+			}
+			if record.Status != 2 || record.CleanupNS != nil || record.QueueNS != nil || record.TransformOutputNS != nil {
+				t.Fatalf("invalid signature outcome: %+v", record)
+			}
+		})
+	}
+}
+
+func TestQualificationLifecycleValidURLSignature(t *testing.T) {
+	store := newQualificationTimingStore()
+	o := ServerOptions{QualSnapshot: true, URLSignatureKey: "secret", EnablePlaceholder: true, PlaceholderStatus: http.StatusTeapot}
+	called := false
+	gate := newImageGate(time.Second).wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}), true)
+	h := qualificationTimingMiddleware(true, store, validateURLSignature(gate, o))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/resize?width=64&height=64&sign=invalid", nil))
-	got := qualificationTimings.snapshot()
-	if w.Code != http.StatusOK || w.Body.Len() == 0 || got.LatestCompletionSequence != before+1 {
-		t.Fatalf("missing signature rejection record: status=%d snapshot=%+v", w.Code, got)
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, signedTestPath("/resize?width=64", o.URLSignatureKey), nil))
+	got := store.snapshot()
+	if !called || w.Code != http.StatusNoContent || len(got.Records) != 1 {
+		t.Fatalf("valid signature did not reach handler: called=%t status=%d records=%+v", called, w.Code, got.Records)
 	}
-	record := got.Records[len(got.Records)-1]
-	if w.Header().Get("X-Imaginary-Request-Sequence") != strconv.FormatUint(record.RequestSequence, 10) {
-		t.Fatal("signature rejection sequence does not match its lifecycle record")
-	}
-	if record.Status != 2 || record.CleanupNS != nil || record.QueueNS != nil {
-		t.Fatalf("invalid signature outcome: %+v", record)
+	record := got.Records[0]
+	if record.Status != 1 || record.QueueNS == nil || record.CleanupNS == nil {
+		t.Fatalf("invalid success outcome: %+v", record)
 	}
 }
 
@@ -388,6 +422,37 @@ func TestQualificationLifecycleBrokenAuthPlaceholderIsError(t *testing.T) {
 	got := store.snapshot()
 	if response.Code != http.StatusBadRequest || len(got.Records) != 1 || got.Records[0].Status != 3 {
 		t.Fatalf("broken native placeholder must be an error: status=%d record=%+v", response.Code, got)
+	}
+}
+
+func TestQualificationLifecycleErrorReplyStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		err        Error
+		priorError bool
+		want       int
+	}{
+		{"client rejection", ErrInvalidURLSignature, false, 2},
+		{"server error", NewError("failure", http.StatusInternalServerError), false, 3},
+		{"invalid error code", NewError("failure", 0), false, 3},
+		{"prior error", ErrInvalidURLSignature, true, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newQualificationTimingStore()
+			h := qualificationTimingMiddleware(true, store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.priorError {
+					qualificationTimingError(r, errors.New("private"))
+				}
+				ErrorReply(r, w, tc.err, ServerOptions{QualSnapshot: true})
+			}))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/resize", nil))
+			checkFixedError(t, w, tc.err)
+			got := store.snapshot()
+			if len(got.Records) != 1 || got.Records[0].Status != tc.want {
+				t.Fatalf("wrong outcome: %+v", got)
+			}
+		})
 	}
 }
 
