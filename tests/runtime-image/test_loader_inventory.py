@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import pathlib
 import unittest
 import json
@@ -67,6 +68,31 @@ class ProtocolTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 loader.collect(run, expected, inspected, binary, source)
 
+    def test_collect_reports_candidate_and_reference_probe_failures(self):
+        config = 'sha256:' + 'a' * 64
+        layers = ['sha256:' + 'b' * 64]
+        expected = {'config': config, 'diff_ids': layers}
+        inspected = [{'Id': config, 'Os': 'linux', 'Architecture': 'amd64',
+                      'RootFS': {'Layers': layers}, 'Config': {'Env': []}}]
+        ref_inspect = [{'Id': loader.reference.CONFIG, 'Os': 'linux', 'Architecture': 'amd64',
+                        'RepoDigests': [loader.reference.IMAGE], 'Config': {'Env': []}}]
+        valid = b'VIPS_PROBE 1\nVERSION 8.10.0\nLOAD VipsForeignLoadA\nSAVE VipsForeignSaveB\nEND\n'
+        for failing_image, reason in ((config, 'candidate-probe'),
+                                      (loader.reference.CONFIG, 'reference-probe')):
+            def run(argv, **kwargs):
+                if argv[1:3] == ['image', 'inspect']:
+                    return json.dumps(ref_inspect).encode()
+                if argv[1] == 'run':
+                    return b'private native output' if failing_image in argv else valid
+                return b''
+            with self.subTest(stage=reason), tempfile.TemporaryDirectory() as directory:
+                binary, source = (pathlib.Path(directory) / name for name in ('binary', 'source'))
+                binary.write_bytes(b'binary')
+                source.write_bytes(b'source')
+                with self.assertRaises(loader.DiagnosticError) as caught:
+                    loader.collect(run, expected, inspected, binary, source)
+                self.assertEqual(str(caught.exception), reason + ': invalid-data')
+
     def test_image_environment_rejects_loader_injection(self):
         loader.safe_environment([{'Config': {'Env': ['PATH=/usr/bin', 'HOME=/tmp']}}])
         for value in ('LD_PRELOAD=/tmp/x', 'VIPS_PATH=/tmp/x', 'LD_LIBRARY_PATH=/tmp'):
@@ -107,6 +133,43 @@ class ProtocolTests(unittest.TestCase):
         self.assertLess(workflow.index('loader-inventory.json" || loader_status'), workflow.index('actions/upload-artifact@'))
         self.assertLess(workflow.index('actions/upload-artifact@'), workflow.index('Enforce loader comparison'))
         self.assertIn('cmp "$RUNNER_TEMP/one/loader-inventory.json" "$RUNNER_TEMP/two/loader-inventory.json"', workflow)
+
+    def test_diagnostics_are_fixed_and_do_not_expose_exception_text(self):
+        cases = ((loader.reference.ProbeExit(19), 'command-exit'),
+                 (loader.reference.CommandError('private native error'), 'command-failed'),
+                 (ValueError('private native error'), 'invalid-data'),
+                 (OSError('private native error'), 'io-failed'),
+                 (KeyError('private native error'), 'invalid-structure'))
+        for error, reason in cases:
+            with self.subTest(reason=reason):
+                with self.assertRaises(loader.DiagnosticError) as caught:
+                    with loader.stage('candidate-probe'):
+                        raise error
+                self.assertEqual(str(caught.exception), 'candidate-probe: ' + reason)
+                self.assertNotIn('private', str(caught.exception))
+
+    def test_main_prints_only_fixed_stage_and_reason(self):
+        with mock.patch.object(loader.sys, 'argv', ['loader', '--expected', 'a', '--inspect', 'b',
+                                                   '--binary', 'c', '--source', 'd', '--output', 'e']), \
+             mock.patch.object(loader.reference, 'require_ci', side_effect=OSError('private error')), \
+             mock.patch.object(loader.sys, 'stderr', new_callable=io.StringIO) as output:
+            self.assertEqual(loader.main(), 1)
+            self.assertEqual(output.getvalue(), 'loader inventory failed: setup: io-failed\n')
+
+    def test_probe_failure_and_cleanup_failure_report_distinct_stages(self):
+        def run(argv, **kwargs):
+            if argv[1] == 'run':
+                raise loader.reference.ProbeExit(1)
+            return b''
+        with self.assertRaises(loader.DiagnosticError) as caught:
+            with loader.stage('candidate-probe'):
+                loader.probe(run, 'image', pathlib.Path('/tmp/probe'))
+        self.assertEqual(str(caught.exception), 'candidate-probe: command-exit')
+        with mock.patch.object(loader, 'cleanup', side_effect=ValueError('secret')):
+            with self.assertRaises(loader.DiagnosticError) as caught:
+                with loader.stage('candidate-probe'):
+                    loader.probe(run, 'image', pathlib.Path('/tmp/probe'))
+        self.assertEqual(str(caught.exception), 'cleanup: invalid-data')
 
     def test_count_limit(self):
         lines = b''.join(('LOAD VipsForeignLoad%04d\n' % i).encode() for i in range(1025))

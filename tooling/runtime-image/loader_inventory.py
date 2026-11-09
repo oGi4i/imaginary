@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Collect bounded registered libvips types from two identity-checked images in CI."""
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -24,6 +25,28 @@ reference = sibling('reference_inventory')
 image_load = sibling('image_load')
 LIMIT = reference.LIMIT
 PROBE = '/usr/local/share/imaginary-build/loader-probe'
+
+
+class DiagnosticError(ValueError):
+    pass
+
+
+@contextmanager
+def stage(name):
+    try:
+        yield
+    except DiagnosticError:
+        raise
+    except reference.ProbeExit:
+        raise DiagnosticError(name + ': command-exit') from None
+    except reference.InventoryError:
+        raise DiagnosticError(name + ': command-failed') from None
+    except OSError:
+        raise DiagnosticError(name + ': io-failed') from None
+    except (KeyError, TypeError):
+        raise DiagnosticError(name + ': invalid-structure') from None
+    except (ValueError, UnicodeError):
+        raise DiagnosticError(name + ': invalid-data') from None
 
 
 def parse_protocol(data):
@@ -113,7 +136,8 @@ def probe(run, image, path):
     try:
         return parse_protocol(run(argv, timeout=45, limit=LIMIT))
     finally:
-        cleanup(run, name, label)
+        with stage('cleanup'):
+            cleanup(run, name, label)
 
 
 def safe_environment(inspect):
@@ -127,20 +151,26 @@ def safe_environment(inspect):
 
 
 def collect(run, expected, inspect, binary, source):
-    image_load.validate_loaded(expected, inspect)
-    safe_environment(inspect)
-    candidate_id = expected['config']
-    binary_hash = digest(binary)
-    source_hash = digest(source)
-    run(['docker', 'pull', '--platform=linux/amd64', reference.IMAGE], timeout=300)
-    ref_data = run(['docker', 'image', 'inspect', reference.IMAGE], timeout=30)
-    ref = reference.identity(ref_data)
-    ref_inspect = image_load.verify._json(b'{"value":' + ref_data + b'}')['value']
-    safe_environment(ref_inspect)
-    candidate = probe(run, candidate_id, binary)
-    published = probe(run, reference.CONFIG, binary)
-    if digest(binary) != binary_hash or digest(source) != source_hash:
-        raise ValueError('probe identity changed')
+    with stage('candidate-identity'):
+        image_load.validate_loaded(expected, inspect)
+        safe_environment(inspect)
+        candidate_id = expected['config']
+    with stage('probe-identity'):
+        binary_hash = digest(binary)
+        source_hash = digest(source)
+    with stage('reference-identity'):
+        run(['docker', 'pull', '--platform=linux/amd64', reference.IMAGE], timeout=300)
+        ref_data = run(['docker', 'image', 'inspect', reference.IMAGE], timeout=30)
+        ref = reference.identity(ref_data)
+        ref_inspect = image_load.verify._json(b'{"value":' + ref_data + b'}')['value']
+        safe_environment(ref_inspect)
+    with stage('candidate-probe'):
+        candidate = probe(run, candidate_id, binary)
+    with stage('reference-probe'):
+        published = probe(run, reference.CONFIG, binary)
+    with stage('probe-identity'):
+        if digest(binary) != binary_hash or digest(source) != source_hash:
+            raise ValueError('probe identity changed')
     differences = {}
     for key in ('loaders', 'savers'):
         differences[key] = {'candidate_only': sorted(set(candidate[key]) - set(published[key])),
@@ -163,24 +193,26 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     try:
-        reference.require_ci()
-        expected = image_load.read_json(args.expected)
-        inspect = image_load.read_json(args.inspect)
-        with tempfile.TemporaryDirectory(prefix='loader-inventory-') as temp:
-            env = {'PATH': os.defpath, 'HOME': temp, 'DOCKER_CONFIG': temp,
-                   'DOCKER_HOST': 'unix:///var/run/docker.sock'}
-            run = lambda argv, **kw: reference.bounded_run(argv, env=env, **kw)
-            binary = args.binary.absolute()
-            if binary.parent.resolve(strict=True) != binary.parent:
-                raise ValueError('unsafe probe path')
-            result = collect(run, expected, inspect, binary, args.source)
-        encoded = (json.dumps(result, sort_keys=True, indent=2) + '\n').encode('ascii')
-        if len(encoded) > LIMIT:
-            raise ValueError('inventory exceeds limit')
-        args.output.write_bytes(encoded)
-        return 0 if result['registered_types_equal'] else 2
-    except (reference.InventoryError, OSError, ValueError, KeyError, TypeError, UnicodeError):
-        print('loader inventory failed', file=sys.stderr)
+        with stage('setup'):
+            reference.require_ci()
+            expected = image_load.read_json(args.expected)
+            inspect = image_load.read_json(args.inspect)
+            with tempfile.TemporaryDirectory(prefix='loader-inventory-') as temp:
+                env = {'PATH': os.defpath, 'HOME': temp, 'DOCKER_CONFIG': temp,
+                       'DOCKER_HOST': 'unix:///var/run/docker.sock'}
+                run = lambda argv, **kw: reference.bounded_run(argv, env=env, **kw)
+                binary = args.binary.absolute()
+                if binary.parent.resolve(strict=True) != binary.parent:
+                    raise ValueError('unsafe probe path')
+                result = collect(run, expected, inspect, binary, args.source)
+        with stage('output'):
+            encoded = (json.dumps(result, sort_keys=True, indent=2) + '\n').encode('ascii')
+            if len(encoded) > LIMIT:
+                raise ValueError('inventory exceeds limit')
+            args.output.write_bytes(encoded)
+            return 0 if result['registered_types_equal'] else 2
+    except DiagnosticError as exc:
+        print('loader inventory failed: ' + str(exc), file=sys.stderr)
         return 1
 
 
