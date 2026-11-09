@@ -76,11 +76,18 @@ reference modification, service startup or local native execution. Native-file
 identities and registered types do not establish full configuration parity.
 Run 42493897646 at `4467683` collected six native files and four symlinks. Four
 support-file hashes and all symlink targets match candidate `5fb0679`; the two
-libvips shared-library binaries differ. CLI/ELF/loader probes remain unavailable.
-Keep `features` null and reference comparability unresolved; see the inventory doc.
-Source CI 42493897663 and both runtime builds/comparison in 42493897661 pass at
-`4467683`; the OCI manifest/config/layers also match the `5fb0679` result. This
-does not resolve the published-reference binary or loader evidence gaps.
+libvips shared-library binaries differ. Stock CLI/ELF/loader probes remain
+unavailable. The separately authorized probe passed in both builds at `d653973`,
+runtime run 42548917990: candidate and pinned published reference each report
+libvips 8.10.0, 42 concrete loaders and 33 concrete savers, with no differences.
+Both loader reports, provenance and strict OCI comparison match. The probe accepts
+`VipsForeignPrintMatrix` only as a saver: libvips 8.10 defines it under
+`VipsForeignSaveMatrix` despite its different prefix. Keep all other validation
+and isolation checks. Source CI 42548917947 passes. Keep `features` null: registered
+types do not prove full configuration parity or publisher source/build provenance.
+See the inventory doc for image/probe identities and retained evidence. Earlier
+source/runtime runs at `4467683` matched the `5fb0679` image; the probe image has
+a new identity. No memory qualification or production approval follows.
 Record all distinct installed providers that satisfy each dependency group, in
 identity order, with the first matching alternative as a witness, not an APT
 choice. Missing or invalid providers still fail. Compatibility diagnostics stay

@@ -65,7 +65,45 @@ and cleanup errors fail closed. The comparison report binds image and probe iden
 differences. A matching registered-type set does not prove every codec behavior,
 full build-configuration parity, publisher provenance or production suitability.
 `features` stays null until the complete required evidence is resolved. Probe
-source and integration do not establish a successful hosted run.
+source and integration alone do not establish a successful hosted run.
+
+## Hosted registered-type result at `d653973`
+
+Runtime run 42548917990 passed both independent builds, both loader-comparison
+gates and strict cross-build comparison. Source CI 42548917947 also passed.
+Candidate and pinned published reference each report libvips 8.10.0, 42 concrete
+loaders and 33 concrete savers, including `VipsForeignPrintMatrix`. Both difference
+sets are empty; the two `loader-inventory.json` files match exactly.
+
+- Candidate manifest: `sha256:d79028c3f225ab6fe137b27220d4b5cd6b4b1e7f8a41b32ca9ca4d67d625e509`.
+- Candidate config: `sha256:ddbe88828274fcbe68f5ac821deef8d8ce3a3b3dfcf2d62ff4fe155c61fa1e7a`.
+- Published reference manifest: `docker.io/h2non/imaginary@sha256:7facb4221047a5e79b9e902f380247f4e5bf4376400d0badbeb738d3e1c2f654`.
+- Published reference config: `sha256:ccc2df4fa965458678f796ef7d2af7ac2752a5b9d564bbab9d7abadac5eb7804`.
+- Probe source SHA-256: `e6b5a52a9a2c9216f9ec47c1b4008b3a750bda670bf7ebc857060df27f22dc39`.
+- Probe binary SHA-256: `877cbba8e7adf7a855b431e3c35ccea1405333834153357173c312fbbc9409d1`.
+- Loader-report SHA-256: `36a7738788fb734ea22142281eaf86a4b4cb96d796f708001b8c29466af80a4a`.
+- Provenance SHA-256: `7edca9d3e0c45687aab7043479b55813b993fb66d836ea7af33770b731f4947f`.
+
+Retained image artifacts 13645340045 and 13644902864 have ZIP digests
+`cca640b2dda5f4ef1d120ff2d5a6b13bc6320037066361094a02f904a75a84f2` and
+`f3577561e9c66565228216bf451ec3f222aa43331cb84cdca6157db396273987`.
+Offline data checks verified those downloads, exact loader/probe/provenance/context
+report equality, and source/tree/recipe/lock/workflow bindings. Hosted strict
+comparison verified matching image manifest, config, layers and ordered DiffIDs.
+Evidence archives are not byte-identical. No downloaded code or image layers ran
+locally.
+
+Earlier probe runs failed because the name-prefix policy rejected the legitimate
+matrix-print saver descendant. libvips v8.10.0 `foreign/matrixsave.c` defines it
+under `VipsForeignSaveMatrix`; recursive concrete-class enumeration includes it.
+The narrow saver-only correction preserves identifier/count/output bounds,
+duplicate rejection, image identities, isolation and cleanup requirements.
+
+This resolves registered-type enumeration only. It does not resolve full
+configuration/codec-behavior parity, publisher source-to-image provenance, security
+suitability or memory qualification. The report keeps `features_complete: false`,
+and the lock keeps `features: null`. The stock inventory still reports missing
+CLI/ELF/configuration tools independently.
 
 ## Hosted native-file result at `4467683`
 
@@ -89,9 +127,10 @@ all four symlink targets match. Both shared-library binaries differ:
 
 All four symlinks select the corresponding `.so.42.12.3` file. A matching filename
 or support file does not explain the binary differences, and different binary
-hashes alone do not prove a loader mismatch. Registered-loader parity and publisher
-source/build provenance remain unresolved. Do not mark `features` complete or
-substitute the instrumented source baseline for this published reference.
+hashes alone do not prove a loader mismatch. Registered types were unresolved at
+this historical checkpoint; the `d653973` result above supplies that evidence.
+Publisher source/build provenance remains unresolved. Do not mark `features`
+complete or substitute the instrumented source baseline for this published reference.
 
 Source CI 42493897663 passed at `4467683`. Runtime run 42493897661 passed both
 independent builds and strict comparison. Its manifest, config, layers and DiffIDs

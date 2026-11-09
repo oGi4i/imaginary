@@ -72,11 +72,14 @@ remains incomplete where tools are missing. Its fixed native-library hash and
 symlink inventory improves file-identity evidence, not registered-loader parity;
 missing tools do not trigger installation or service startup. Run 42493897646
 collected six native files and four symlinks: support files and link targets match
-candidate `5fb0679`, but the two libvips shared-library binaries differ. Loader
-parity and publisher provenance remain unresolved. The user separately authorized
-a source-owned registered-loader/saver probe against both images, using the same
-hash-bound read-only executable mount in isolated hosted containers. Its source
-is not evidence of a completed comparison; see the inventory documentation.
+candidate `5fb0679`, but the two libvips shared-library binaries differ. The
+separately authorized registered-type probe passed against both images at
+`d653973` in runtime run 42548917990: each reports libvips 8.10.0, 42 concrete
+loaders and 33 concrete savers, with no differences. Both independent builds,
+loader reports, provenance and strict OCI comparison pass. This uses the same
+hash-bound read-only executable in isolated hosted containers, not service
+startup. Full configuration parity and publisher provenance remain unresolved;
+see the inventory documentation for identities and verification limits.
 Source CI 42493897663 and
 runtime run 42493897661 pass at `4467683`, with the same OCI manifest/config/layers
 as `5fb0679`. Dependency edges record every distinct
